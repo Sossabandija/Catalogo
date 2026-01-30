@@ -41,6 +41,10 @@ class ProductReviewerGUI:
         self.modified = False
         self.selected_idx = None
         
+        # Configuración de GUI
+        self.font_size = tk.IntVar(value=10)
+        self.window_size = tk.StringVar(value="1400x800")
+        
         # Configurar estilo
         self.setup_styles()
         
@@ -88,6 +92,99 @@ class ProductReviewerGUI:
         style.configure('Treeview', rowheight=28, font=('Segoe UI', 10))
         style.configure('Treeview.Heading', font=('Segoe UI', 10, 'bold'))
     
+    def apply_font_size(self):
+        """Aplica el tamaño de fuente seleccionado a toda la GUI."""
+        size = self.font_size.get()
+        style = ttk.Style()
+        
+        # Actualizar Treeview
+        row_height = int(size * 2.5)  # Ajustar altura de fila proporcionalmente
+        style.configure('Treeview', rowheight=row_height, font=('Segoe UI', size))
+        style.configure('Treeview.Heading', font=('Segoe UI', size, 'bold'))
+        
+        # Actualizar fuente por defecto
+        default_font = ('Segoe UI', size)
+        bold_font = ('Segoe UI', size, 'bold')
+        title_font = ('Segoe UI', size + 4, 'bold')
+        
+        # Configurar fuentes de widgets ttk
+        style.configure('TLabel', font=default_font)
+        style.configure('TButton', font=default_font)
+        style.configure('TEntry', font=default_font)
+        style.configure('TCombobox', font=default_font)
+        style.configure('TCheckbutton', font=default_font)
+        style.configure('TRadiobutton', font=default_font)
+        style.configure('TNotebook.Tab', font=default_font)
+        
+        # Actualizar fuente global para widgets tk (Entry, Label, Text, etc.)
+        self.root.option_add('*Font', default_font)
+        self.root.option_add('*TEntry*font', default_font)
+        
+        # Guardar fuentes para uso posterior
+        self.current_font = default_font
+        self.current_bold_font = bold_font
+        self.current_title_font = title_font
+        
+        # Actualizar widgets existentes recursivamente
+        self._update_widget_fonts(self.root, size)
+        
+        # Actualizar etiquetas de datos básicos específicamente
+        if hasattr(self, 'field_labels'):
+            for lbl in self.field_labels:
+                try:
+                    lbl.configure(font=bold_font)
+                except:
+                    pass
+        
+        # Actualizar entries de campos básicos
+        if hasattr(self, 'field_entries'):
+            for entry in self.field_entries:
+                try:
+                    entry.configure(font=default_font)
+                except:
+                    pass
+        
+        # Refrescar la lista si hay datos
+        if self.df is not None:
+            self.refresh_product_list()
+        
+        self.update_status(f"Tamaño de fuente cambiado a {size} pt")
+    
+    def _update_widget_fonts(self, widget, size):
+        """Actualiza las fuentes de todos los widgets hijos recursivamente."""
+        default_font = ('Segoe UI', size)
+        bold_font = ('Segoe UI', size, 'bold')
+        
+        try:
+            # Actualizar widgets tk
+            if isinstance(widget, (tk.Entry, tk.Text, tk.Label, tk.Button, tk.Listbox)):
+                widget.configure(font=default_font)
+            elif isinstance(widget, tk.Menu):
+                widget.configure(font=default_font)
+        except tk.TclError:
+            pass  # Algunos widgets no soportan configuración de fuente
+        
+        # Actualizar hijos
+        try:
+            for child in widget.winfo_children():
+                self._update_widget_fonts(child, size)
+        except:
+            pass
+        
+        self.update_status(f"Tamaño de fuente cambiado a {size} pt")
+    
+    def apply_window_size(self):
+        """Aplica el tamaño de ventana seleccionado."""
+        size = self.window_size.get()
+        
+        if size == "maximized":
+            self.root.state('zoomed')  # Windows
+        else:
+            self.root.state('normal')
+            self.root.geometry(size)
+        
+        self.update_status(f"Tamaño de ventana: {size}")
+    
     def create_menu(self):
         """Crea menú principal."""
         menubar = tk.Menu(self.root)
@@ -131,6 +228,43 @@ class ProductReviewerGUI:
         group_menu.add_separator()
         group_menu.add_command(label="Separar del grupo", command=self.remove_from_group)
         group_menu.add_command(label="🗑️ Eliminar grupo completo", command=self.delete_group)
+        
+        # Configuración
+        config_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="⚙️ Config", menu=config_menu)
+        
+        # Submenú GUI
+        gui_menu = tk.Menu(config_menu, tearoff=0)
+        config_menu.add_cascade(label="🖥️ GUI", menu=gui_menu)
+        
+        # Tamaño de fuente
+        font_menu = tk.Menu(gui_menu, tearoff=0)
+        gui_menu.add_cascade(label="📝 Tamaño de fuente", menu=font_menu)
+        for size in [8, 9, 10, 11, 12, 14, 16, 18, 20]:
+            font_menu.add_radiobutton(
+                label=f"{size} pt",
+                variable=self.font_size,
+                value=size,
+                command=self.apply_font_size
+            )
+        
+        # Tamaño de ventana
+        window_menu = tk.Menu(gui_menu, tearoff=0)
+        gui_menu.add_cascade(label="📐 Tamaño de ventana", menu=window_menu)
+        window_sizes = [
+            ("Pequeña (1200x700)", "1200x700"),
+            ("Normal (1400x800)", "1400x800"),
+            ("Grande (1600x900)", "1600x900"),
+            ("Extra grande (1800x1000)", "1800x1000"),
+            ("Maximizada", "maximized"),
+        ]
+        for label, size in window_sizes:
+            window_menu.add_radiobutton(
+                label=label,
+                variable=self.window_size,
+                value=size,
+                command=self.apply_window_size
+            )
         
         # Atajos de teclado
         self.root.bind('<Control-o>', lambda e: self.open_file())
@@ -291,6 +425,7 @@ class ProductReviewerGUI:
         # Variables para campos
         self.field_vars = {}
         self.field_entries = []  # Para navegación con Enter
+        self.field_labels = []   # Para actualizar fuentes
         
         fields = [
             ('ID', 'ID', False),
@@ -310,9 +445,9 @@ class ProductReviewerGUI:
         ]
         
         for i, (label, field, editable) in enumerate(fields):
-            ttk.Label(self.basic_frame, text=f"{label}:", font=('Segoe UI', 10, 'bold')).grid(
-                row=i, column=0, sticky='w', pady=3, padx=5
-            )
+            lbl = ttk.Label(self.basic_frame, text=f"{label}:", font=('Segoe UI', 10, 'bold'))
+            lbl.grid(row=i, column=0, sticky='w', pady=3, padx=5)
+            self.field_labels.append(lbl)
             
             var = tk.StringVar()
             self.field_vars[field] = var
@@ -1175,7 +1310,9 @@ class ProductReviewerGUI:
         frame = ttk.Frame(dialog)
         frame.pack(fill=tk.BOTH, expand=True, padx=10)
         
-        listbox = tk.Listbox(frame, selectmode=tk.MULTIPLE, font=('Segoe UI', 10))
+        # Usar tamaño de fuente configurado
+        font_size = self.font_size.get() if hasattr(self, 'font_size') else 10
+        listbox = tk.Listbox(frame, selectmode=tk.MULTIPLE, font=('Segoe UI', font_size))
         scrollbar = ttk.Scrollbar(frame, orient="vertical", command=listbox.yview)
         listbox.configure(yscrollcommand=scrollbar.set)
         
@@ -1410,8 +1547,11 @@ class ProductReviewerGUI:
         products_frame = ttk.LabelFrame(dialog, text=f"📦 Productos a agregar ({len(selection)})", padding=5)
         products_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
         
+        # Usar tamaño de fuente configurado
+        font_size = self.font_size.get() if hasattr(self, 'font_size') else 10
+        
         # Lista de productos seleccionados (máximo 5 visibles)
-        products_list = tk.Listbox(products_frame, height=min(5, len(selection)), font=('Segoe UI', 9))
+        products_list = tk.Listbox(products_frame, height=min(5, len(selection)), font=('Segoe UI', font_size - 1))
         if len(selection) > 5:
             prod_scroll = ttk.Scrollbar(products_frame, orient="vertical", command=products_list.yview)
             products_list.configure(yscrollcommand=prod_scroll.set)
@@ -1447,7 +1587,9 @@ class ProductReviewerGUI:
         frame = ttk.Frame(dialog)
         frame.pack(fill=tk.BOTH, expand=True, padx=10)
         
-        listbox = tk.Listbox(frame, font=('Segoe UI', 10))
+        # Usar tamaño de fuente configurado
+        font_size = self.font_size.get() if hasattr(self, 'font_size') else 10
+        listbox = tk.Listbox(frame, font=('Segoe UI', font_size))
         scrollbar = ttk.Scrollbar(frame, orient="vertical", command=listbox.yview)
         listbox.configure(yscrollcommand=scrollbar.set)
         
