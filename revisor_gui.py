@@ -20,13 +20,14 @@ class ProductReviewerGUI:
     """Interfaz gráfica para revisión de productos."""
     
     # Columnas de atributos WooCommerce (hasta 6)
+    # Formato: (nombre, valor, visible, global)
     ATTR_COLS = [
-        ('Nombre del atributo 1', 'Valor(es) del atributo 1', 'Atributo visible 1'),
-        ('Nombre del atributo 2', 'Valor(es) del atributo 2', 'Atributo visible 2'),
-        ('Nombre del atributo 3', 'Valor(es) del atributo 3', 'Atributo visible 3'),
-        ('Nombre del atributo 4', 'Valor(es) del atributo 4', 'Atributo visible 4'),
-        ('Nombre del atributo 5', 'Valor(es) del atributo 5', 'Atributo visible 5'),
-        ('Nombre del atributo 6', 'Valor(es) del atributo 6', 'Atributo visible 6'),
+        ('Nombre del atributo 1', 'Valor(es) del atributo 1', 'Atributo visible 1', 'Atributo global 1'),
+        ('Nombre del atributo 2', 'Valor(es) del atributo 2', 'Atributo visible 2', 'Atributo global 2'),
+        ('Nombre del atributo 3', 'Valor(es) del atributo 3', 'Atributo visible 3', 'Atributo global 3'),
+        ('Nombre del atributo 4', 'Valor(es) del atributo 4', 'Atributo visible 4', 'Atributo global 4'),
+        ('Nombre del atributo 5', 'Valor(es) del atributo 5', 'Atributo visible 5', 'Atributo global 5'),
+        ('Nombre del atributo 6', 'Valor(es) del atributo 6', 'Atributo visible 6', 'Atributo global 6'),
     ]
     
     def __init__(self, root):
@@ -507,6 +508,7 @@ class ProductReviewerGUI:
                 'name': tk.StringVar(),
                 'value': tk.StringVar(),
                 'visible': tk.IntVar(value=1),
+                'global': tk.IntVar(value=0),
             }
             entries_dict = {}
             
@@ -526,10 +528,11 @@ class ProductReviewerGUI:
             val_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
             entries_dict['value'] = val_entry
             
-            # Visible + botones
+            # Visible + Global + botones
             opt_frame = ttk.Frame(frame)
             opt_frame.pack(fill=tk.X, pady=2)
             ttk.Checkbutton(opt_frame, text="Visible", variable=vars_dict['visible']).pack(side=tk.LEFT)
+            ttk.Checkbutton(opt_frame, text="Global", variable=vars_dict['global']).pack(side=tk.LEFT, padx=(10, 0))
             ttk.Button(opt_frame, text="🗑️", width=3, 
                       command=lambda idx=i: self.clear_attribute(idx)).pack(side=tk.RIGHT)
             
@@ -582,25 +585,28 @@ class ProductReviewerGUI:
                 children_idx = children.index.tolist()
             
             # Guardar atributos
-            for i, (name_col, val_col, vis_col) in enumerate(self.ATTR_COLS):
+            for i, (name_col, val_col, vis_col, glob_col) in enumerate(self.ATTR_COLS):
                 new_name = self.attr_vars[i]['name'].get().strip()
                 new_value = self.attr_vars[i]['value'].get().strip()
                 new_visible = self.attr_vars[i]['visible'].get()
+                new_global = self.attr_vars[i]['global'].get()
                 
                 # Guardar en producto actual
                 try:
                     self.df.at[idx, name_col] = new_name if new_name else ''
                     self.df.at[idx, val_col] = new_value if new_value else ''
                     self.df.at[idx, vis_col] = int(new_visible)
+                    self.df.at[idx, glob_col] = int(new_global)
                 except Exception:
                     pass
                 
-                # Si es padre, propagar nombre y visibilidad a hijos
+                # Si es padre, propagar nombre, visibilidad y global a hijos
                 if tipo == 'variable' and children_idx:
                     for child_idx in children_idx:
                         try:
                             self.df.at[child_idx, name_col] = new_name if new_name else ''
                             self.df.at[child_idx, vis_col] = int(new_visible)
+                            self.df.at[child_idx, glob_col] = int(new_global)
                         except Exception:
                             pass
             
@@ -823,11 +829,18 @@ class ProductReviewerGUI:
             if 'Notas_Revisión' not in self.df.columns:
                 self.df['Notas_Revisión'] = ''
             
-            # Asegurar columnas de atributos
-            for name_col, val_col, vis_col in self.ATTR_COLS:
-                for col in [name_col, val_col, vis_col]:
+            # Asegurar columnas de atributos (con tipo string)
+            for name_col, val_col, vis_col, glob_col in self.ATTR_COLS:
+                for col in [name_col, val_col]:
                     if col not in self.df.columns:
                         self.df[col] = ''
+                    # Convertir a string para evitar errores de tipo
+                    self.df[col] = self.df[col].fillna('').astype(str)
+                for col in [vis_col, glob_col]:
+                    if col not in self.df.columns:
+                        self.df[col] = 0
+                    # Convertir a int, manejando NaN
+                    self.df[col] = pd.to_numeric(self.df[col], errors='coerce').fillna(0).astype(int)
             
             self.file_path = path
             self.modified = False
@@ -1040,10 +1053,11 @@ class ProductReviewerGUI:
             var.set(str(value))
         
         # Cargar atributos
-        for i, (name_col, val_col, vis_col) in enumerate(self.ATTR_COLS):
+        for i, (name_col, val_col, vis_col, glob_col) in enumerate(self.ATTR_COLS):
             name = row.get(name_col, '')
             value = row.get(val_col, '')
             visible = row.get(vis_col, 1)
+            global_attr = row.get(glob_col, 0)
             
             self.attr_vars[i]['name'].set('' if pd.isna(name) else str(name))
             self.attr_vars[i]['value'].set('' if pd.isna(value) else str(value))
@@ -1056,6 +1070,16 @@ class ProductReviewerGUI:
                 except (ValueError, TypeError):
                     vis_val = 1
             self.attr_vars[i]['visible'].set(vis_val)
+            
+            # Manejar global
+            if pd.isna(global_attr) or global_attr == '':
+                glob_val = 0
+            else:
+                try:
+                    glob_val = int(float(global_attr))
+                except (ValueError, TypeError):
+                    glob_val = 0
+            self.attr_vars[i]['global'].set(glob_val)
         
         # Cargar info del grupo
         self.load_group_info(idx)
@@ -1089,7 +1113,7 @@ class ProductReviewerGUI:
             
             for child_idx, child in children.iterrows():
                 attrs = []
-                for name_col, val_col, _ in self.ATTR_COLS:
+                for name_col, val_col, _, _ in self.ATTR_COLS:
                     name = child.get(name_col, '')
                     val = child.get(val_col, '')
                     if pd.notna(name) and name:
@@ -1128,7 +1152,7 @@ class ProductReviewerGUI:
                     # Mostrar todas las variaciones, resaltando la actual
                     for sib_idx, sibling in siblings.iterrows():
                         attrs = []
-                        for name_col, val_col, _ in self.ATTR_COLS:
+                        for name_col, val_col, _, _ in self.ATTR_COLS:
                             name = sibling.get(name_col, '')
                             val = sibling.get(val_col, '')
                             if pd.notna(name) and name:
@@ -1195,13 +1219,21 @@ class ProductReviewerGUI:
                     pass
         
         # Guardar atributos
-        for i, (name_col, val_col, vis_col) in enumerate(self.ATTR_COLS):
+        for i, (name_col, val_col, vis_col, glob_col) in enumerate(self.ATTR_COLS):
             try:
-                self.df.at[idx, name_col] = self.attr_vars[i]['name'].get().strip()
-                self.df.at[idx, val_col] = self.attr_vars[i]['value'].get().strip()
+                name_val = self.attr_vars[i]['name'].get().strip()
+                val_val = self.attr_vars[i]['value'].get().strip()
+                self.df.at[idx, name_col] = name_val if name_val else ''
+                self.df.at[idx, val_col] = val_val if val_val else ''
                 self.df.at[idx, vis_col] = int(self.attr_vars[i]['visible'].get())
+                self.df.at[idx, glob_col] = int(self.attr_vars[i]['global'].get())
             except Exception:
                 pass
+        
+        # Si es variación, sincronizar atributos del padre
+        row = self.df.loc[idx]
+        if row.get('Tipo') == 'variation':
+            self.sync_parent_attributes(idx)
         
         self.modified = True
         self.update_modified_indicator()
@@ -1214,6 +1246,79 @@ class ProductReviewerGUI:
             pass
         
         self.update_status("Producto actualizado")
+    
+    def sync_parent_attributes(self, variation_idx: int):
+        """Sincroniza los atributos del padre basándose en todas sus variaciones.
+        
+        Para cada atributo, el padre tendrá todos los valores únicos de los hijos
+        separados por '|'.
+        """
+        if self.df is None:
+            return
+        
+        row = self.df.loc[variation_idx]
+        principal = row.get('Principal', '')
+        
+        if 'id:' not in str(principal):
+            return
+        
+        # Obtener ID del padre
+        parent_id = int(str(principal).replace('id:', ''))
+        parent_df = self.df[self.df['ID'] == parent_id]
+        
+        if len(parent_df) == 0:
+            return
+        
+        parent_idx = parent_df.index[0]
+        
+        # Obtener todas las variaciones del mismo padre
+        siblings = self.df[self.df['Principal'] == f'id:{parent_id}']
+        
+        if len(siblings) == 0:
+            return
+        
+        # Para cada slot de atributo, recolectar valores únicos de todos los hijos
+        for i, (name_col, val_col, vis_col, glob_col) in enumerate(self.ATTR_COLS):
+            # Recolectar todos los nombres y valores de atributos de los hijos
+            attr_names = set()
+            attr_values = set()
+            attr_global = 0  # Si algún hijo tiene global=1, el padre también
+            
+            for _, child in siblings.iterrows():
+                name = child.get(name_col, '')
+                value = child.get(val_col, '')
+                global_val = child.get(glob_col, 0)
+                
+                if pd.notna(name) and str(name).strip():
+                    attr_names.add(str(name).strip())
+                
+                if pd.notna(value) and str(value).strip():
+                    # Separar valores que ya están unidos por |
+                    for v in str(value).split('|'):
+                        v = v.strip()
+                        if v:
+                            attr_values.add(v)
+                
+                try:
+                    if int(float(global_val)) == 1:
+                        attr_global = 1
+                except:
+                    pass
+            
+            # Actualizar el padre si hay atributos
+            if attr_names:
+                # Usar el primer nombre encontrado (deberían ser iguales)
+                self.df.at[parent_idx, name_col] = list(attr_names)[0]
+                # Unir todos los valores únicos con |
+                self.df.at[parent_idx, val_col] = '|'.join(sorted(attr_values))
+                self.df.at[parent_idx, vis_col] = 1
+                self.df.at[parent_idx, glob_col] = attr_global
+            else:
+                # Limpiar si no hay atributos en los hijos
+                self.df.at[parent_idx, name_col] = ''
+                self.df.at[parent_idx, val_col] = ''
+                self.df.at[parent_idx, vis_col] = 0
+                self.df.at[parent_idx, glob_col] = 0
     
     def reload_current_product(self):
         """Recarga datos del producto actual."""
@@ -1310,6 +1415,7 @@ class ProductReviewerGUI:
         self.attr_vars[idx]['name'].set('')
         self.attr_vars[idx]['value'].set('')
         self.attr_vars[idx]['visible'].set(1)
+        self.attr_vars[idx]['global'].set(0)
     
     # ===== Grupos =====
     
@@ -1414,6 +1520,7 @@ class ProductReviewerGUI:
             
             parent_id = row['ID']
             added_count = 0
+            first_added_idx = None
             for sel in selections:
                 if sel in idx_map:
                     simple_idx = idx_map[sel]
@@ -1421,6 +1528,12 @@ class ProductReviewerGUI:
                     self.df.at[simple_idx, 'Principal'] = f'id:{parent_id}'
                     self.df.at[simple_idx, 'Clase de impuesto'] = 'parent'
                     added_count += 1
+                    if first_added_idx is None:
+                        first_added_idx = simple_idx
+            
+            # Sincronizar atributos del padre
+            if first_added_idx is not None:
+                self.sync_parent_attributes(first_added_idx)
             
             self.modified = True
             self.update_modified_indicator()
@@ -1443,11 +1556,25 @@ class ProductReviewerGUI:
             messagebox.showinfo("Info", "Selecciona una variación en la lista")
             return
         
+        # Guardar el padre antes de modificar
+        first_idx = int(selection[0])
+        principal = self.df.loc[first_idx].get('Principal', '')
+        parent_id = None
+        if 'id:' in str(principal):
+            parent_id = int(str(principal).replace('id:', ''))
+        
         for item in selection:
             idx = int(item)
             self.df.at[idx, 'Tipo'] = 'simple'
             self.df.at[idx, 'Principal'] = ''
             self.df.at[idx, 'Clase de impuesto'] = ''
+        
+        # Sincronizar atributos del padre después de quitar variaciones
+        if parent_id is not None:
+            # Buscar cualquier variación restante para sincronizar
+            remaining = self.df[self.df['Principal'] == f'id:{parent_id}']
+            if len(remaining) > 0:
+                self.sync_parent_attributes(remaining.index[0])
         
         self.modified = True
         self.update_modified_indicator()
@@ -1478,7 +1605,7 @@ class ProductReviewerGUI:
                 for child_idx, child in children.iterrows():
                     # Construir nombre con atributos
                     attrs = []
-                    for name_col, val_col, _ in self.ATTR_COLS:
+                    for name_col, val_col, _, _ in self.ATTR_COLS:
                         val = child.get(val_col, '')
                         if pd.notna(val) and val:
                             attrs.append(str(val))
@@ -1536,21 +1663,29 @@ class ProductReviewerGUI:
         parent_data['Revisado_Humano'] = 'No'
         
         # Recopilar atributos
-        for i, (name_col, val_col, vis_col) in enumerate(self.ATTR_COLS):
+        for i, (name_col, val_col, vis_col, glob_col) in enumerate(self.ATTR_COLS):
             all_names = set()
             all_vals = set()
+            any_global = 0
             for idx in indices:
                 name = self.df.loc[idx, name_col]
                 val = self.df.loc[idx, val_col]
+                glob = self.df.loc[idx, glob_col]
                 if pd.notna(name) and name:
                     all_names.add(str(name))
                 if pd.notna(val) and val:
                     all_vals.add(str(val))
+                try:
+                    if int(float(glob)) == 1:
+                        any_global = 1
+                except:
+                    pass
             
             if all_names:
                 parent_data[name_col] = list(all_names)[0]
                 parent_data[val_col] = '|'.join(sorted(all_vals))
                 parent_data[vis_col] = 1
+                parent_data[glob_col] = any_global
         
         # Agregar padre
         parent_df = pd.DataFrame([parent_data])
@@ -1700,11 +1835,18 @@ class ProductReviewerGUI:
             parent_id = self.df.loc[parent_idx, 'ID']
             parent_name = self.df.loc[parent_idx, 'Nombre']
             
+            first_added_idx = None
             for item in selection:
                 idx = int(item)
                 self.df.at[idx, 'Tipo'] = 'variation'
                 self.df.at[idx, 'Principal'] = f'id:{parent_id}'
                 self.df.at[idx, 'Clase de impuesto'] = 'parent'
+                if first_added_idx is None:
+                    first_added_idx = idx
+            
+            # Sincronizar atributos del padre
+            if first_added_idx is not None:
+                self.sync_parent_attributes(first_added_idx)
             
             self.modified = True
             self.update_modified_indicator()
@@ -1725,6 +1867,15 @@ class ProductReviewerGUI:
         if not selection:
             return
         
+        # Guardar información de los padres antes de modificar
+        parent_ids_to_sync = set()
+        for item in selection:
+            idx = int(item)
+            if self.df.loc[idx, 'Tipo'] == 'variation':
+                principal = self.df.loc[idx].get('Principal', '')
+                if 'id:' in str(principal):
+                    parent_ids_to_sync.add(int(str(principal).replace('id:', '')))
+        
         count = 0
         for item in selection:
             idx = int(item)
@@ -1733,6 +1884,12 @@ class ProductReviewerGUI:
                 self.df.at[idx, 'Principal'] = ''
                 self.df.at[idx, 'Clase de impuesto'] = ''
                 count += 1
+        
+        # Sincronizar atributos de los padres afectados
+        for parent_id in parent_ids_to_sync:
+            remaining = self.df[self.df['Principal'] == f'id:{parent_id}']
+            if len(remaining) > 0:
+                self.sync_parent_attributes(remaining.index[0])
         
         if count > 0:
             self.modified = True
@@ -1748,6 +1905,20 @@ class ProductReviewerGUI:
         if len(groups) == 0:
             messagebox.showinfo("Info", "No hay grupos disponibles para eliminar")
             return
+        
+        # Determinar si hay un grupo actual para pre-seleccionar
+        preselect_parent_id = None
+        if self.selected_idx is not None and self.selected_idx in self.df.index:
+            row = self.df.loc[self.selected_idx]
+            tipo = row.get('Tipo', '')
+            if tipo == 'variable':
+                # Es un grupo/padre
+                preselect_parent_id = row['ID']
+            elif tipo == 'variation':
+                # Es una variación - buscar su padre
+                principal = row.get('Principal', '')
+                if 'id:' in str(principal):
+                    preselect_parent_id = int(str(principal).replace('id:', ''))
         
         # Diálogo de selección de grupo
         dialog = tk.Toplevel(self.root)
@@ -1771,6 +1942,7 @@ class ProductReviewerGUI:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         idx_map = {}
+        preselect_index = None
         for i, (idx, group) in enumerate(groups.iterrows()):
             # Contar variaciones
             parent_id = group['ID']
@@ -1778,6 +1950,16 @@ class ProductReviewerGUI:
             var_count = len(variations)
             listbox.insert(tk.END, f"{group['SKU']} - {group['Nombre'][:35]} ({var_count} variaciones)")
             idx_map[i] = idx
+            
+            # Verificar si es el grupo a pre-seleccionar
+            if preselect_parent_id is not None and parent_id == preselect_parent_id:
+                preselect_index = i
+        
+        # Pre-seleccionar el grupo actual si existe
+        if preselect_index is not None:
+            listbox.selection_set(preselect_index)
+            listbox.see(preselect_index)
+            listbox.activate(preselect_index)
         
         # Opciones
         options_frame = ttk.LabelFrame(dialog, text="Opciones", padding=10)
@@ -1858,6 +2040,7 @@ class ProductReviewerGUI:
             self.attr_vars[i]['name'].set('')
             self.attr_vars[i]['value'].set('')
             self.attr_vars[i]['visible'].set(0)
+            self.attr_vars[i]['global'].set(0)
         
         # Limpiar info del grupo
         self.group_info_label.config(text="Selecciona un producto para ver información del grupo")

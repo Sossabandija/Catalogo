@@ -82,11 +82,26 @@ class ReviewFormatter:
         'Valor(es) del atributo 2',
         'Atributo visible 2',
         'Atributo global 2',
-        # Atributo 3 (extensible hasta 10)
+        # Atributo 3
         'Nombre del atributo 3',
         'Valor(es) del atributo 3',
         'Atributo visible 3',
         'Atributo global 3',
+        # Atributo 4
+        'Nombre del atributo 4',
+        'Valor(es) del atributo 4',
+        'Atributo visible 4',
+        'Atributo global 4',
+        # Atributo 5
+        'Nombre del atributo 5',
+        'Valor(es) del atributo 5',
+        'Atributo visible 5',
+        'Atributo global 5',
+        # Atributo 6
+        'Nombre del atributo 6',
+        'Valor(es) del atributo 6',
+        'Atributo visible 6',
+        'Atributo global 6',
     ]
     
     # Columnas adicionales de auditoría (solo para Excel interno, no WooCommerce)
