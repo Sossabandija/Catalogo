@@ -1,0 +1,10 @@
+# Catálogo Ferretería - Dependencias de Python
+# Instalar con: pip install -r requirements.txt
+
+pandas>=1.5.0       # Manipulación de DataFrames
+openpyxl>=3.0.0     # Lectura/escritura de archivos Excel (.xlsx)
+pyyaml>=5.4         # Carga de archivos YAML para configuración
+
+# Opcional para desarrollo
+pytest>=7.0         # Testing
+black>=22.0         # Formateo de código

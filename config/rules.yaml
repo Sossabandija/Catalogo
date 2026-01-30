@@ -1,0 +1,142 @@
+# REGLAS DETERMINISTAS PARA CATÁLOGO DE FERRETERÍA
+# Sistema sin ML: solo patrones regex y palabras clave explícitas
+
+# 1. FAMILIAS DE PRODUCTOS (por palabras clave)
+families:
+  abrazaderas:
+    keywords: ['abrazadera', 'abraza', 'tuerca abraz', 'clip']
+    category: 'Abrazaderas y clips'
+  
+  tornillos:
+    keywords: ['tornillo', 'tirafondo', 'hexagonal']
+    category: 'Tornillos'
+  
+  tuercas:
+    keywords: ['tuerca', 'tuercas']
+    category: 'Tuercas'
+  
+  anclajes:
+    keywords: ['anclaje', 'tarugo', 'perno']
+    category: 'Anclajes y pernos'
+  
+  herramientas:
+    keywords: ['llave', 'destornillador', 'martillo', 'sierra']
+    category: 'Herramientas'
+  
+  cables:
+    keywords: ['cable', 'cordon', 'cuerda']
+    category: 'Cables y cordones'
+
+# 2. PATRONES DE ATRIBUTOS TÉCNICOS (regex deterministas)
+attributes:
+  # Diametro: 1/4 inch, 3/8 inch, 10mm, 1.1/8 inch, etc.
+  diametro:
+    patterns:
+      - '(\d+(?:[.,]\d+)?)\s*(?:pulgada|pulg|inch)'
+      - '(\d+(?:[.,]\d+)?)\s*mm'
+      - '(\d+\.\d+/\d+)'
+    label: 'Diametro'
+    unit: 'pulgada/mm'
+
+  # Largo: 10cm, 5m, 12 inch, etc.
+  largo:
+    patterns:
+      - '(?:largo|long|length|medida)\s*[:\s]*(\d+(?:[.,]\d+)?)\s*(?:cm|m|mm|inch)?'
+      - '(\d+(?:[.,]\d+)?)\s*(?:cm|metros|m)(?:\D|$)'
+    label: 'Largo'
+    unit: 'cm/m'
+
+  # Grosor/Espesor: 2.5mm, 3/8 inch, etc.
+  grosor:
+    patterns:
+      - '(?:grosor|espesor|thickness)\s*[:\s]*(\d+(?:[.,]\d+)?)\s*(?:mm|inch)?'
+      - '(\d+(?:[.,]\d+)?)\s*mm(?:\D|$)'
+    label: 'Grosor'
+    unit: 'mm'
+
+  # Material: acero, hierro, carbono, inox, cobre, aluminio
+  material:
+    keywords: ['acero', 'hierro', 'carbono', 'inox', 'inoxidable', 'cobre', 'aluminio', 'galvanizado', 'cromado']
+    label: 'Material'
+
+  # Acabado: galvanizado, cromado, fosfatado, plateado
+  acabado:
+    keywords: ['galvanizado', 'cromado', 'fosfatado', 'plateado', 'oxidado', 'brillante', 'mate']
+    label: 'Acabado'
+
+  # Marca: TITAN, HEXAGON, DURLOCK, etc.
+  marca:
+    patterns:
+      - '^(?:MARCA\s*[:\s])?([A-Z][A-Z\s\d]*?)(?:\s+(?:MINI|MAXI|PRO|STANDARD))?(?:\s+[A-Z]|$)'
+    label: 'Marca'
+
+# 3. RANGOS DE VALORES (para normalizacion)
+ranges:
+  diametro_comun:
+    - '1/4 inch'
+    - '5/16 inch'
+    - '3/8 inch'
+    - '7/16 inch'
+    - '1/2 inch'
+    - '5/8 inch'
+    - '3/4 inch'
+    - '7/8 inch'
+    - '1 inch'
+    - '1.1/8 inch'
+    - '1.1/4 inch'
+    - '1.3/8 inch'
+    - '1.1/2 inch'
+
+  largo_comun:
+    - '5cm'
+    - '10cm'
+    - '15cm'
+    - '20cm'
+    - '25cm'
+    - '30cm'
+    - '50cm'
+    - '1m'
+    - '2m'
+    - '5m'
+
+# 4. PALABRAS CLAVE PARA AGRUPACION DE VARIACIONES
+variation_keywords:
+  size: ['1/4', '3/8', '1/2', '5/8', '3/4', '7/8', '1 inch', 'mm', 'cm']
+  length: ['10cm', '20cm', '30cm', '50cm', '1m', '2m', '5m', '10m']
+  material: ['acero', 'galvanizado', 'inox', 'cobre', 'aluminio']
+  quantity: ['pack', 'caja', 'bolsa', 'tubo', 'lote']
+
+# 5. PATRONES A IGNORAR (ruido)
+noise_patterns:
+  - 'stock|disponible|oferta|promocion|descuento'
+  - 'consulte|precio especial|bajo pedido'
+
+# 6. UMBRALES DE CONFIANZA AUTOMATICA
+confidence:
+  min_score: 0.4
+  factors:
+    nombre_limpio: 0.3
+    atributos_detectados: 0.2
+    marca_validada: 0.2
+    sin_ambiguedad: 0.3
+
+# 7. PATRONES PARA PRODUCTO PADRE vs VARIACION
+parent_product:
+  patterns:
+    - 'kit|pack|surtido|variado'
+    - 'completo|incluye|varios'
+  min_variations: 2
+
+variation_product:
+  patterns:
+    - 'tamaño|medida|diametro|largo|espesor|grosor'
+  parent_keywords: ['kit', 'pack', 'set', 'surtido']
+
+# 8. MAPEO DE CATEGORIAS A WOOCOMMERCE
+category_mapping:
+  'Abrazaderas y clips': 'Fijaciones > Abrazaderas'
+  'Tornillos': 'Tornilleria > Tornillos'
+  'Tuercas': 'Tornilleria > Tuercas'
+  'Anclajes y pernos': 'Fijaciones > Anclajes'
+  'Herramientas': 'Herramientas'
+  'Cables y cordones': 'Accesorios > Cables'
