@@ -668,8 +668,17 @@ class ProductReviewerGUI:
         self.group_info_frame = ttk.LabelFrame(parent, text="Información del Grupo", padding=10)
         self.group_info_frame.pack(fill=tk.X, pady=(0, 10))
         
-        self.group_info_label = ttk.Label(self.group_info_frame, text="Selecciona un producto para ver información del grupo")
-        self.group_info_label.pack()
+        # Frame para label e info
+        info_content = ttk.Frame(self.group_info_frame)
+        info_content.pack(fill=tk.X)
+        
+        self.group_info_label = ttk.Label(info_content, text="Selecciona un producto para ver información del grupo")
+        self.group_info_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Botón para ir al padre (solo visible para variaciones)
+        self.go_to_parent_btn = ttk.Button(info_content, text="👨 Ir al Padre", command=self.go_to_parent)
+        self.go_to_parent_btn.pack(side=tk.RIGHT, padx=5)
+        self.go_to_parent_btn.pack_forget()  # Ocultar inicialmente
         
         # Lista de variaciones
         var_frame = ttk.LabelFrame(parent, text="Variaciones", padding=10)
@@ -723,6 +732,37 @@ class ProductReviewerGUI:
             else:
                 # Si no está visible (por filtro), mostrar mensaje
                 messagebox.showinfo("Info", "El producto no está visible con el filtro actual. Cambia a 'Todos' para verlo.")
+    
+    def go_to_parent(self):
+        """Navega al producto padre de la variación actual."""
+        if not hasattr(self, 'current_parent_idx') or self.current_parent_idx is None:
+            messagebox.showinfo("Info", "No hay padre para seleccionar")
+            return
+        
+        idx = self.current_parent_idx
+        
+        # Buscar en el treeview principal y seleccionar
+        if str(idx) in self.tree.get_children():
+            self.tree.selection_set(str(idx))
+            self.tree.see(str(idx))
+            self.tree.focus(str(idx))
+            # Cargar detalles
+            self.selected_idx = idx
+            self.load_product_details(idx)
+            self.update_status(f"Navegado al padre: {self.df.loc[idx, 'Nombre'][:50]}")
+        else:
+            # Si no está visible (por filtro), cambiar a "todos" y seleccionar
+            self.filter_products('all')
+            self.root.after(100, lambda: self._select_product(idx))
+    
+    def _select_product(self, idx):
+        """Selecciona un producto en el treeview (helper para after)."""
+        if str(idx) in self.tree.get_children():
+            self.tree.selection_set(str(idx))
+            self.tree.see(str(idx))
+            self.tree.focus(str(idx))
+            self.selected_idx = idx
+            self.load_product_details(idx)
     
     def create_status_bar(self):
         """Crea barra de estado."""
@@ -1028,6 +1068,10 @@ class ProductReviewerGUI:
         row = self.df.loc[idx]
         tipo = row.get('Tipo', '')
         
+        # Ocultar botón de ir al padre por defecto
+        self.go_to_parent_btn.pack_forget()
+        self.current_parent_idx = None  # Para guardar el índice del padre
+        
         # Limpiar variaciones
         for item in self.var_tree.get_children():
             self.var_tree.delete(item)
@@ -1068,6 +1112,10 @@ class ProductReviewerGUI:
                 if len(parent_df) > 0:
                     parent = parent_df.iloc[0]
                     parent_idx = parent_df.index[0]
+                    
+                    # Guardar índice del padre y mostrar botón
+                    self.current_parent_idx = parent_idx
+                    self.go_to_parent_btn.pack(side=tk.RIGHT, padx=5)
                     
                     # Buscar todas las variaciones del mismo padre
                     siblings = self.df[self.df['Principal'] == f'id:{parent_id}']
