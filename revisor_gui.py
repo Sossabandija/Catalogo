@@ -279,20 +279,19 @@ class ProductReviewerGUI:
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
+        # Usar PanedWindow para paneles redimensionables
+        self.paned = ttk.PanedWindow(main_frame, orient=tk.HORIZONTAL)
+        self.paned.pack(fill=tk.BOTH, expand=True)
+        
         # Panel izquierdo - Lista de productos
-        left_panel = ttk.Frame(main_frame, width=500)
-        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        left_panel.pack_propagate(False)
+        left_panel = ttk.Frame(self.paned)
+        self.paned.add(left_panel, weight=1)
         
         self.create_product_list(left_panel)
         
-        # Separador
-        ttk.Separator(main_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
-        
         # Panel derecho - Detalle y edición
-        right_panel = ttk.Frame(main_frame, width=600)
-        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-        right_panel.pack_propagate(False)
+        right_panel = ttk.Frame(self.paned)
+        self.paned.add(right_panel, weight=1)
         
         self.create_detail_panel(right_panel)
     
@@ -321,12 +320,20 @@ class ProductReviewerGUI:
         search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=30)
         search_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
+        # Filtro por marca
+        ttk.Label(search_frame, text="🏷️").pack(side=tk.RIGHT, padx=(10, 0))
+        self.brand_filter_var = tk.StringVar(value='Todas')
+        self.brand_filter_combo = ttk.Combobox(search_frame, textvariable=self.brand_filter_var,
+                                               values=['Todas'], width=15, state='readonly')
+        self.brand_filter_combo.pack(side=tk.RIGHT, padx=2)
+        self.brand_filter_combo.bind('<<ComboboxSelected>>', lambda e: self.apply_filters())
+        
         # Filtro por tipo
         self.filter_var = tk.StringVar(value='all')
         filter_combo = ttk.Combobox(search_frame, textvariable=self.filter_var, 
                                     values=['all', 'simple', 'variable', 'variation', 'pending', 'approved'],
                                     width=12, state='readonly')
-        filter_combo.pack(side=tk.RIGHT)
+        filter_combo.pack(side=tk.RIGHT, padx=2)
         filter_combo.bind('<<ComboboxSelected>>', lambda e: self.apply_filters())
         
         # Treeview de productos
@@ -343,11 +350,12 @@ class ProductReviewerGUI:
         self.tree.heading('precio', text='Precio')
         self.tree.heading('estado', text='Estado')
         
-        self.tree.column('tipo', width=80, anchor='center')
-        self.tree.column('sku', width=120)
-        self.tree.column('nombre', width=200)
-        self.tree.column('precio', width=80, anchor='e')
-        self.tree.column('estado', width=70, anchor='center')
+        # Columnas con stretch para responsividad
+        self.tree.column('tipo', width=80, minwidth=60, anchor='center', stretch=False)
+        self.tree.column('sku', width=120, minwidth=80, stretch=True)
+        self.tree.column('nombre', width=200, minwidth=100, stretch=True)
+        self.tree.column('precio', width=80, minwidth=60, anchor='e', stretch=False)
+        self.tree.column('estado', width=70, minwidth=50, anchor='center', stretch=False)
         
         # Scrollbars
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
@@ -397,13 +405,13 @@ class ProductReviewerGUI:
         self.notebook.add(group_tab, text="👨‍👧‍👦 Grupo")
         self.create_group_panel(group_tab)
         
-        # Botones de acción
+        # Botones de acción responsivos
         action_frame = ttk.Frame(parent)
         action_frame.pack(fill=tk.X, pady=(10, 0))
         
-        ttk.Button(action_frame, text="💾 Guardar Cambios", command=self.save_current_product).pack(side=tk.LEFT, padx=5)
-        ttk.Button(action_frame, text="↩️ Descartar", command=self.reload_current_product).pack(side=tk.LEFT, padx=5)
-        ttk.Button(action_frame, text="✓ Aprobar", command=self.approve_selected).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(action_frame, text="💾 Guardar", command=self.save_current_product).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        ttk.Button(action_frame, text="↩️ Descartar", command=self.reload_current_product).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        ttk.Button(action_frame, text="✓ Aprobar", command=self.approve_selected).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
     
     def create_basic_fields(self, parent):
         """Crea campos básicos de edición."""
@@ -690,36 +698,52 @@ class ProductReviewerGUI:
         var_frame = ttk.LabelFrame(parent, text="Variaciones", padding=10)
         var_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Botones
+        # Botones - usar dos filas para mejor responsividad
         btn_frame = ttk.Frame(var_frame)
         btn_frame.pack(fill=tk.X, pady=(0, 10))
         
-        ttk.Button(btn_frame, text="➕ Agregar variación", command=self.add_variation).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_frame, text="➖ Quitar del grupo", command=self.remove_variation).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_frame, text="✓ Aprobar", command=self.approve_variations).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_frame, text="✗ Rechazar", command=self.reject_variations).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_frame, text="🗑️ Eliminar grupo", command=self.delete_group).pack(side=tk.RIGHT, padx=2)
-        ttk.Button(btn_frame, text="✏️ Renombrar grupo", command=self.rename_group).pack(side=tk.RIGHT, padx=2)
+        # Fila 1: Acciones de variaciones
+        btn_row1 = ttk.Frame(btn_frame)
+        btn_row1.pack(fill=tk.X, pady=2)
+        ttk.Button(btn_row1, text="➕ Agregar", command=self.add_variation).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        ttk.Button(btn_row1, text="➖ Quitar", command=self.remove_variation).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        ttk.Button(btn_row1, text="✓ Aprobar", command=self.approve_variations).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        ttk.Button(btn_row1, text="✗ Rechazar", command=self.reject_variations).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
         
-        # Treeview de variaciones (con selección múltiple)
+        # Fila 2: Acciones de grupo
+        btn_row2 = ttk.Frame(btn_frame)
+        btn_row2.pack(fill=tk.X, pady=2)
+        ttk.Button(btn_row2, text="✏️ Renombrar grupo", command=self.rename_group).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        ttk.Button(btn_row2, text="🗑️ Eliminar grupo", command=self.delete_group).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        
+        # Treeview de variaciones con grid para responsividad
+        tree_container = ttk.Frame(var_frame)
+        tree_container.pack(fill=tk.BOTH, expand=True)
+        
         columns = ('sku', 'nombre', 'precio', 'atributos')
-        self.var_tree = ttk.Treeview(var_frame, columns=columns, show='headings', height=8, selectmode='extended')
+        self.var_tree = ttk.Treeview(tree_container, columns=columns, show='headings', height=8, selectmode='extended')
         
         self.var_tree.heading('sku', text='SKU')
         self.var_tree.heading('nombre', text='Nombre')
         self.var_tree.heading('precio', text='Precio')
         self.var_tree.heading('atributos', text='Atributos')
         
-        self.var_tree.column('sku', width=100)
-        self.var_tree.column('nombre', width=200)
-        self.var_tree.column('precio', width=80)
-        self.var_tree.column('atributos', width=150)
+        # Columnas con stretch para responsividad
+        self.var_tree.column('sku', width=100, minwidth=60, stretch=True)
+        self.var_tree.column('nombre', width=200, minwidth=100, stretch=True)
+        self.var_tree.column('precio', width=80, minwidth=50, stretch=False)
+        self.var_tree.column('atributos', width=150, minwidth=80, stretch=True)
         
-        vsb = ttk.Scrollbar(var_frame, orient="vertical", command=self.var_tree.yview)
-        self.var_tree.configure(yscrollcommand=vsb.set)
+        vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.var_tree.yview)
+        hsb = ttk.Scrollbar(tree_container, orient="horizontal", command=self.var_tree.xview)
+        self.var_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         
-        self.var_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.var_tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
+        
+        tree_container.grid_rowconfigure(0, weight=1)
+        tree_container.grid_columnconfigure(0, weight=1)
         
         # Doble clic para navegar a la variación
         self.var_tree.bind('<Double-1>', self.on_variation_double_click)
@@ -847,6 +871,7 @@ class ProductReviewerGUI:
             self.file_path = path
             self.modified = False
             
+            self.update_brand_filter()
             self.refresh_product_list()
             self.update_status(f"Cargado: {path.name}")
             self.root.title(f"📦 Revisor de Productos - {path.name}")
@@ -976,6 +1001,11 @@ class ProductReviewerGUI:
         elif filter_type == 'approved':
             df = df[df['Revisado_Humano'] == 'Sí']
         
+        # Filtro por marca
+        brand = self.brand_filter_var.get()
+        if brand and brand != 'Todas':
+            df = df[df['Marcas'].astype(str).str.upper() == brand.upper()]
+        
         # Filtro por búsqueda
         search = self.search_var.get().strip().upper()
         if search:
@@ -990,6 +1020,22 @@ class ProductReviewerGUI:
     def apply_filters(self):
         """Aplica filtros y actualiza lista."""
         self.refresh_product_list()
+    
+    def update_brand_filter(self):
+        """Actualiza las marcas disponibles en el filtro."""
+        if self.df is None:
+            self.brand_filter_combo['values'] = ['Todas']
+            return
+        
+        # Obtener marcas únicas (excluyendo vacías y NaN)
+        brands = self.df['Marcas'].dropna().astype(str)
+        brands = brands[brands.str.strip() != '']
+        unique_brands = sorted(brands.unique(), key=str.lower)
+        
+        # Agregar 'Todas' al inicio
+        all_brands = ['Todas'] + unique_brands
+        self.brand_filter_combo['values'] = all_brands
+        self.brand_filter_var.set('Todas')
     
     def filter_by_search(self):
         """Filtra por texto de búsqueda."""
