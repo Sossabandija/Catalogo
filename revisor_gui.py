@@ -696,12 +696,14 @@ class ProductReviewerGUI:
         
         ttk.Button(btn_frame, text="➕ Agregar variación", command=self.add_variation).pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_frame, text="➖ Quitar del grupo", command=self.remove_variation).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="✓ Aprobar", command=self.approve_variations).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="✗ Rechazar", command=self.reject_variations).pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_frame, text="🗑️ Eliminar grupo", command=self.delete_group).pack(side=tk.RIGHT, padx=2)
         ttk.Button(btn_frame, text="✏️ Renombrar grupo", command=self.rename_group).pack(side=tk.RIGHT, padx=2)
         
-        # Treeview de variaciones
+        # Treeview de variaciones (con selección múltiple)
         columns = ('sku', 'nombre', 'precio', 'atributos')
-        self.var_tree = ttk.Treeview(var_frame, columns=columns, show='headings', height=8)
+        self.var_tree = ttk.Treeview(var_frame, columns=columns, show='headings', height=8, selectmode='extended')
         
         self.var_tree.heading('sku', text='SKU')
         self.var_tree.heading('nombre', text='Nombre')
@@ -1581,6 +1583,46 @@ class ProductReviewerGUI:
         self.refresh_product_list()
         self.load_group_info(self.selected_idx)
         self.update_status(f"{len(selection)} variación(es) convertida(s) a simple")
+    
+    def approve_variations(self):
+        """Aprueba las variaciones seleccionadas en el panel de grupo."""
+        selection = self.var_tree.selection()
+        if not selection:
+            messagebox.showinfo("Info", "Selecciona variaciones en la lista (usa Ctrl+clic para seleccionar múltiples)")
+            return
+        
+        count = 0
+        for item in selection:
+            idx = int(item)
+            if idx in self.df.index:
+                self.df.at[idx, 'Revisado_Humano'] = 'Sí'
+                count += 1
+        
+        self.modified = True
+        self.update_modified_indicator()
+        self.refresh_product_list()
+        self.load_group_info(self.selected_idx)
+        self.update_status(f"{count} variación(es) aprobada(s)")
+    
+    def reject_variations(self):
+        """Rechaza las variaciones seleccionadas en el panel de grupo."""
+        selection = self.var_tree.selection()
+        if not selection:
+            messagebox.showinfo("Info", "Selecciona variaciones en la lista (usa Ctrl+clic para seleccionar múltiples)")
+            return
+        
+        count = 0
+        for item in selection:
+            idx = int(item)
+            if idx in self.df.index:
+                self.df.at[idx, 'Revisado_Humano'] = 'No'
+                count += 1
+        
+        self.modified = True
+        self.update_modified_indicator()
+        self.refresh_product_list()
+        self.load_group_info(self.selected_idx)
+        self.update_status(f"{count} variación(es) rechazada(s)")
     
     def rename_group(self):
         """Renombra el grupo."""
