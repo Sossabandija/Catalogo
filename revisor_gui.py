@@ -9,6 +9,7 @@ Uso:
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
+import tkinter.font as tkfont
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
@@ -327,6 +328,8 @@ class ProductReviewerGUI:
                                                values=['Todas'], width=15, state='readonly')
         self.brand_filter_combo.pack(side=tk.RIGHT, padx=2)
         self.brand_filter_combo.bind('<<ComboboxSelected>>', lambda e: self.apply_filters())
+        # Ajustar ancho del dropdown dinámicamente
+        self.brand_filter_combo.bind('<Button-1>', lambda e: self.adjust_brand_combo_width())
         
         # Filtro por tipo
         self.filter_var = tk.StringVar(value='all')
@@ -1010,8 +1013,8 @@ class ProductReviewerGUI:
         search = self.search_var.get().strip().upper()
         if search:
             mask = (
-                df['SKU'].astype(str).str.upper().str.contains(search, na=False) |
-                df['Nombre'].astype(str).str.upper().str.contains(search, na=False)
+                df['SKU'].astype(str).str.upper().str.contains(search, na=False, regex=False) |
+                df['Nombre'].astype(str).str.upper().str.contains(search, na=False, regex=False)
             )
             df = df[mask]
         
@@ -1036,6 +1039,36 @@ class ProductReviewerGUI:
         all_brands = ['Todas'] + unique_brands
         self.brand_filter_combo['values'] = all_brands
         self.brand_filter_var.set('Todas')
+    
+    def adjust_brand_combo_width(self):
+        """Ajusta el ancho del dropdown de marcas para mostrar nombres completos."""
+        values = self.brand_filter_combo['values']
+        if not values:
+            return
+        
+        try:
+            # Crear fuente basada en la configuración actual
+            font_spec = self.brand_filter_combo.cget('font')
+            if font_spec:
+                font = tkfont.Font(font=font_spec)
+            else:
+                font = tkfont.Font()
+            
+            # Calcular el ancho máximo necesario
+            max_width = max(font.measure(str(v)) for v in values)
+            
+            # Añadir padding para el scrollbar y márgenes
+            max_width += 40
+            
+            # Obtener el popup del combobox y ajustar su ancho
+            self.brand_filter_combo.update_idletasks()
+            # El popup es un toplevel con un listbox dentro
+            popup = self.brand_filter_combo.tk.call('ttk::combobox::PopdownWindow', self.brand_filter_combo)
+            listbox = self.root.nametowidget(f'{popup}.f.l')
+            listbox.configure(width=0)  # Permitir que se ajuste al contenido
+            self.root.nametowidget(popup).geometry(f'{max_width}x200')
+        except Exception:
+            pass  # Ignorar si no se puede ajustar
     
     def filter_by_search(self):
         """Filtra por texto de búsqueda."""
@@ -1686,11 +1719,16 @@ class ProductReviewerGUI:
             self.df.at[self.selected_idx, 'Nombre'] = new_name
             
             # Preguntar si actualizar hijos
-            if messagebox.askyesno("Actualizar hijos", "¿Actualizar nombres de las variaciones?"):
+            if messagebox.askyesno("Actualizar hijos", "¿Actualizar nombres de las variaciones sin nombre?"):
                 parent_id = row['ID']
                 children = self.df[self.df['Principal'] == f'id:{parent_id}']
                 
                 for child_idx, child in children.iterrows():
+                    # Solo actualizar si no tiene nombre o está vacío
+                    current_name = child.get('Nombre', '')
+                    if pd.notna(current_name) and str(current_name).strip():
+                        continue  # Ya tiene nombre, dejarlo intacto
+                    
                     # Construir nombre con atributos
                     attrs = []
                     for name_col, val_col, _, _ in self.ATTR_COLS:
