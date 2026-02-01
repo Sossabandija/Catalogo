@@ -5,6 +5,12 @@ pandas>=1.5.0       # Manipulación de DataFrames
 openpyxl>=3.0.0     # Lectura/escritura de archivos Excel (.xlsx)
 pyyaml>=5.4         # Carga de archivos YAML para configuración
 
+# Extracción de catálogo desde PDF
+pymupdf>=1.24.0      # Lectura de PDF (PyMuPDF/fitz)
+# Opcional: extracción espacial con LLMWhisper (guardar .txt para no repetir llamadas)
+# pip install llmwhisperer-client
+# Variables de entorno: LLMWHISPERER_API_KEY, LLMWHISPERER_BASE_URL_V2
+
 # Opcional para desarrollo
 pytest>=7.0         # Testing
 black>=22.0         # Formateo de código
