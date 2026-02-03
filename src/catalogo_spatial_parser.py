@@ -53,17 +53,37 @@ def looks_like_sku(token: str) -> bool:
 def split_line_halves(line: str, gap_end_pos: int = 56) -> tuple[str, str]:
     """
     Divide una línea en mitad izquierda y derecha.
-    gap_end_pos es donde termina el gap central (donde empieza la tabla derecha).
+    Usa gap_end_pos como referencia para la posición donde termina la tabla izquierda.
     """
-    # Buscar el inicio del gap (punto donde hay muchos espacios antes de gap_end_pos)
+    import re
+    
+    if len(line) <= gap_end_pos:
+        return line.rstrip(), ""
+    
+    # Buscar el gap que termina cerca de gap_end_pos (tolerancia de ±10 caracteres)
+    gaps = list(re.finditer(r' {4,}', line))
+    
+    # Buscar un gap cuyo final esté cerca de gap_end_pos
+    best_gap = None
+    best_dist = float('inf')
+    for g in gaps:
+        # Preferir gaps que terminen cerca de gap_end_pos
+        dist = abs(g.end() - gap_end_pos)
+        if dist < best_dist and dist < 15:  # Tolerancia de 15 caracteres
+            best_dist = dist
+            best_gap = g
+    
+    if best_gap:
+        left = line[:best_gap.start()].rstrip()
+        right = line[best_gap.end():].strip()
+        return left, right
+    
+    # Fallback: cortar en gap_end_pos buscando hacia atrás un espacio
     gap_start = gap_end_pos
     i = gap_end_pos - 1
     while i >= 0 and line[i:i+1] == ' ':
         gap_start = i
         i -= 1
-    
-    if len(line) <= gap_start:
-        return line.rstrip(), ""
     
     left = line[:gap_start].rstrip()
     right = line[gap_end_pos:].strip() if len(line) > gap_end_pos else ""
@@ -75,6 +95,7 @@ def parse_row_parts(parts: list[str]) -> dict[str, str] | None:
     Parsea las partes de una fila y las asigna a columnas.
     Maneja casos donde NOMINAL y LARGO están juntos debido al OCR.
     También maneja casos donde SKU y NOMINAL están unidos en el primer part.
+    Formato esperado: CODIGO [NOMINAL] LARGO ENVASE [ENTRE_CARAS]
     """
     if not parts:
         return None
@@ -98,15 +119,34 @@ def parse_row_parts(parts: list[str]) -> dict[str, str] | None:
         result = {"CODIGO": first_part}
         remaining = parts[1:]
     
-    # El ENVASE siempre es el último (contiene "U" o es número)
+    # Buscar ENVASE en cualquier posición (contiene " U" o termina con "U")
+    # El formato típico es: CODIGO [NOMINAL] LARGO ENVASE [ENTRE_CARAS]
+    # ENTRE_CARAS solo existe si ENVASE estaba en penúltima posición (antes del último elemento)
     envase = ""
-    if remaining:
-        last = remaining[-1]
-        # Detectar si es ENVASE (típicamente "X,XXX U" o similar)
-        if " U" in last or last.endswith("U") or re.match(r'^[\d,\.]+$', last):
-            envase = remaining.pop()
+    envase_idx = -1
+    original_len = len(remaining)
+    
+    for i, part in enumerate(remaining):
+        # ENVASE típico: "500 U", "100 U", "1,000 U", "200 U b/BL2Eu"
+        if " U" in part or (part.endswith("U") and re.match(r'^[\d,\.]+\s*U$', part)):
+            envase = part
+            envase_idx = i
+            break
+    
+    # ENTRE_CARAS solo existe si ENVASE era el penúltimo elemento original
+    # Es decir, ENVASE estaba en posición len-2 y ENTRE_CARAS en len-1
+    entre_caras = ""
+    if envase_idx >= 0:
+        # Si ENVASE era penúltimo y el último es una fracción sin ", es ENTRE_CARAS
+        if envase_idx == original_len - 2:
+            last = remaining[-1]
+            if re.match(r'^[\d/]+$', last) and '"' not in last and len(last) <= 5:
+                entre_caras = remaining.pop()
+        remaining.pop(envase_idx)
     
     result["ENVASE"] = envase
+    if entre_caras:
+        result["ENTRE_CARAS"] = entre_caras
     
     # Ahora remaining tiene [NOMINAL, LARGO] o [LARGO] o [NOMINAL+LARGO combinado]
     if not remaining:
@@ -114,10 +154,11 @@ def parse_row_parts(parts: list[str]) -> dict[str, str] | None:
     
     if len(remaining) == 1:
         val = remaining[0]
-        # Verificar si es NOMINAL + LARGO combinado (ej: "#6-9[CRS] 5/8")
-        # NOMINAL típico: #X-Y, #X-Y[CRS], números como M5, 5.2
+        # Verificar si es NOMINAL + LARGO combinado (ej: "#6-9[CRS] 5/8", "#5(3.70) 60", "#10-24[3/16] 3/4")
+        # NOMINAL típico: #X-Y, #X-Y[CRS], #X(valor), #X-Y[fracción], números como M5, 5.2
         # LARGO típico: fracciones, medidas con ", números
-        match = re.match(r'^(#[\d\-\[\]A-Za-z]+)\s+(.+)$', val)
+        # Patrón: # seguido de dígitos, guiones, corchetes, paréntesis, barras, decimales
+        match = re.match(r'^(#[\d\-\[\]A-Za-z\(\)\.\,\/]+)\s+(.+)$', val)
         if match:
             result["NOMINAL"] = match.group(1)
             result["LARGO"] = match.group(2)
@@ -213,7 +254,7 @@ def is_finish_line(line: str) -> bool:
     finishes = [
         "zincado", "fosfatizado", "ruspert", "dacromet", "iridiscente",
         "balde", "envase pequeño", "acero inoxidable", "inox",
-        "acabado especial", "revestimiento", "bronce",
+        "acabado especial", "revestimiento", "bronce", "pavonado",
     ]
     return any(stripped.startswith(f) for f in finishes)
 
@@ -397,11 +438,15 @@ def parse_spatial_catalog(text: str) -> tuple[dict[str, Any], dict[str, dict]]:
     gap_end_pos = int(sum(gap_end_positions) / len(gap_end_positions)) if gap_end_positions else 56
     has_two_tables = len(gap_end_positions) > 0
     
+    # Variable para detectar si acabamos de pasar un cambio de página
+    after_page_break = False
+    
     for line in lines:
         # Saltar marcadores de página
         if "Página" in line and " de " in line:
             continue
-        if line.strip() == "<<<":
+        if line.strip() == "<<<" or line.strip().startswith("<<<"):
+            after_page_break = True
             continue
         
         # Detectar cambio de sección (FIJACIONES - Tornillos para Volcanita)
@@ -420,9 +465,75 @@ def parse_spatial_catalog(text: str) -> tuple[dict[str, Any], dict[str, dict]]:
                     subtype_right = ""
                     pending_title_left = ""
                     pending_title_right = ""
+                    after_page_break = False
                     continue
         
-        # Detectar header de tabla - esto finaliza títulos pendientes
+        # Detectar recordatorio de subcategoría o nueva sección principal después de cambio de página
+        # Ej: "TORNILLOS PARA MADERA" sola después de "<<<"
+        stripped = line.strip()
+        if stripped and after_page_break:
+            # Normalizar para comparación
+            stripped_upper = " ".join(stripped.upper().split())  # Normalizar espacios
+            
+            # Lista de secciones principales que pueden aparecer después de page breaks
+            # Estas son secciones de la página índice del catálogo
+            KNOWN_MAIN_SECTIONS = [
+                "TORNILLOS PARA VOLCANITA",
+                "TORNILLOS PARA METALCON", 
+                "TORNILLOS PARA FIBROCEMENTO",
+                "TORNILLOS PARA DECK",
+                "TORNILLOS PARA VENTANAS DE PVC",
+                "TORNILLOS PARA MADERA",
+                "TORNILLOS PARA MADERAS",
+                "TORNILLOS WINGER",
+                "TORNILLOS PARA FACHADAS",
+                "TORNILLOS AUTOPERFORANTES",
+                "ROSCALATAS Y ATERRAJADORES",
+                "PUNTAS E INSERTOS",
+                "PUNTAS, INSERTOS Y DADOS",
+                "PERNOS HEXAGONALES",
+                "PRODUCTOS PARA TECHO",
+                "ANCLAJES",
+                "TARUGOS",
+                "CLAVOS",
+                "CABLES, CADENAS Y ACCESORIOS",
+                "BROCAS, DISCOS Y SOLDADURAS",
+                "HERRAMIENTAS",
+                "CONECTORES PARA MADERA",
+                "PERNOS MÁQUINA",
+                "COMPLEMENTOS DE LINEA",
+            ]
+            
+            # Verificar si es una sección principal conocida
+            for section in KNOWN_MAIN_SECTIONS:
+                if section in stripped_upper or stripped_upper in section:
+                    # Actualizar subcategoría a esta sección
+                    current_subcategory = stripped.strip()
+                    product_type_left = ""
+                    product_type_right = ""
+                    subtype_left = ""
+                    subtype_right = ""
+                    pending_title_left = ""
+                    pending_title_right = ""
+                    after_page_break = False
+                    break
+            else:
+                # Si no matchea ninguna sección conocida, verificar si es recordatorio
+                subcat_upper = " ".join(current_subcategory.upper().split())
+                if stripped_upper in subcat_upper or subcat_upper in stripped_upper:
+                    # Es un recordatorio de subcategoría, ignorar
+                    pending_title_left = ""
+                    pending_title_right = ""
+                    after_page_break = False
+            if not after_page_break:
+                continue
+        
+        # Si ya procesamos una línea no vacía después del page break, desactivar flag
+        if stripped:
+            after_page_break = False
+        
+        # Detectar header de tabla en la línea COMPLETA
+        # NOTA: No resetear nominales aquí, hacerlo después del split para cada lado
         if is_header_line(line):
             # Consolidar títulos pendientes
             if pending_title_left:
@@ -431,9 +542,13 @@ def parse_spatial_catalog(text: str) -> tuple[dict[str, Any], dict[str, dict]]:
             if pending_title_right:
                 product_type_right = pending_title_right
                 pending_title_right = ""
-            last_nominal_left = ""
-            last_nominal_right = ""
-            continue
+            # Solo continuar si la línea SOLO tiene header (no datos)
+            # Si hay datos en un lado, procesar normalmente
+            left_test, right_test = split_line_halves(line, gap_end_pos)
+            if is_header_line(left_test) and (not right_test or is_header_line(right_test)):
+                last_nominal_left = ""
+                last_nominal_right = ""
+                continue
         
         # Dividir línea en mitades para procesamiento INDEPENDIENTE
         left_part, right_part = split_line_halves(line, gap_end_pos)
@@ -448,9 +563,14 @@ def parse_spatial_catalog(text: str) -> tuple[dict[str, Any], dict[str, dict]]:
                     product_type_left = pending_title_left
                     pending_title_left = ""
                 last_nominal_left = ""
+                # Resetear subtipo cuando hay nueva tabla (nuevo header)
+                subtype_left = ""
             # Detectar acabado en izquierda
             elif is_finish_line(left_part):
                 finish_left = left_stripped
+                # Si el acabado NO es "continuación", resetear subtipo
+                if "continuaci" not in left_stripped.lower():
+                    subtype_left = ""
             # Detectar título en izquierda
             elif is_title_line(left_part) and not looks_like_sku(left_stripped.split()[0] if left_stripped.split() else ""):
                 if pending_title_left:
@@ -486,9 +606,15 @@ def parse_spatial_catalog(text: str) -> tuple[dict[str, Any], dict[str, dict]]:
                     product_type_right = pending_title_right
                     pending_title_right = ""
                 last_nominal_right = ""
+                # Resetear subtipo cuando hay nueva tabla (nuevo header)
+                subtype_right = ""
             # Detectar acabado en derecha
             elif is_finish_line(right_part):
                 finish_right = right_stripped
+                # Si el acabado NO es "continuación", resetear subtipo
+                # porque es una nueva sección de acabado
+                if "continuaci" not in right_stripped.lower():
+                    subtype_right = ""
             # Detectar título en derecha
             elif is_title_line(right_part) and not looks_like_sku(right_stripped.split()[0] if right_stripped.split() else ""):
                 if pending_title_right:

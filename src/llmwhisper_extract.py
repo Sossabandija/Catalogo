@@ -56,9 +56,11 @@ def get_pdf_text_via_llmwhisper(
     txt_path: str | Path | None = None,
     output_mode: str = "layout_preserving",
     wait_timeout: int = 300,
+    pages_per_batch: int = 20,
 ) -> str:
     """
     Extrae texto del PDF usando LLMWhisper (modo layout_preserving por defecto para extracción espacial).
+    Procesa en lotes de páginas para evitar límites de la API.
     Guarda el resultado en txt_path si se indica.
     """
     client = get_client()
@@ -72,16 +74,65 @@ def get_pdf_text_via_llmwhisper(
     if not pdf_path.exists():
         raise FileNotFoundError(f"PDF no encontrado: {pdf_path}")
 
-    result = client.whisper(
-        file_path=str(pdf_path),
-        mode="high_quality",
-        output_mode=output_mode,
-        wait_for_completion=True,
-        wait_timeout=wait_timeout,
-        encoding="utf-8",
-    )
+    # Obtener número total de páginas del PDF
+    try:
+        import fitz  # PyMuPDF
+        doc = fitz.open(str(pdf_path))
+        total_pages = len(doc)
+        doc.close()
+        print(f"PDF tiene {total_pages} páginas")
+    except ImportError:
+        print("PyMuPDF no disponible, extrayendo todo el PDF en una sola llamada...")
+        total_pages = None
+    
+    all_text = []
+    
+    if total_pages and total_pages > pages_per_batch:
+        # Procesar en lotes
+        for start_page in range(1, total_pages + 1, pages_per_batch):
+            end_page = min(start_page + pages_per_batch - 1, total_pages)
+            page_range = f"{start_page}-{end_page}"
+            print(f"  Extrayendo páginas {page_range} de {total_pages}...")
+            
+            result = client.whisper(
+                file_path=str(pdf_path),
+                mode="high_quality",
+                output_mode=output_mode,
+                wait_for_completion=True,
+                wait_timeout=wait_timeout,
+                encoding="utf-8",
+                pages_to_extract=page_range,
+            )
+            
+            batch_text = _extract_text_from_result(result)
+            if batch_text:
+                all_text.append(f"<<< Páginas {page_range} >>>")
+                all_text.append(batch_text)
+        
+        text = "\n".join(all_text)
+    else:
+        # Procesar todo de una vez
+        result = client.whisper(
+            file_path=str(pdf_path),
+            mode="high_quality",
+            output_mode=output_mode,
+            wait_for_completion=True,
+            wait_timeout=wait_timeout,
+            encoding="utf-8",
+        )
+        text = _extract_text_from_result(result)
 
-    # La API Retrieve devuelve "result_text"; el cliente puede devolver "extraction" o "result_text"
+    if txt_path is not None:
+        txt_path = Path(txt_path)
+        txt_path.parent.mkdir(parents=True, exist_ok=True)
+        txt_path.write_text(text, encoding="utf-8")
+        print(f"Texto guardado en: {txt_path}")
+
+    return text
+
+
+def _extract_text_from_result(result) -> str:
+    """Extrae el texto del resultado de LLMWhisper."""
     text = ""
     if isinstance(result, dict):
         # Primero intentar result_text directo
@@ -102,12 +153,7 @@ def get_pdf_text_via_llmwhisper(
         if isinstance(text, bytes):
             text = text.decode("utf-8", errors="replace")
         text = text or ""
-
-    if txt_path is not None:
-        txt_path = Path(txt_path)
-        txt_path.parent.mkdir(parents=True, exist_ok=True)
-        txt_path.write_text(text, encoding="utf-8")
-
+    
     return text
 
 
