@@ -14,6 +14,12 @@ La separación entre tablas izquierda/derecha es aproximadamente en la posición
 import re
 from typing import Any
 
+# Logos/marcas que aparecen en el PDF pero NO son parte del texto del catálogo
+LOGO_BLACKLIST = frozenset({
+    "ESSVE",  # Marca de herramientas que aparece como logotipo
+    "KNAPP",  # connectors.com
+})
+
 # Palabras que NO son SKUs
 SKU_BLACKLIST = frozenset({
     "BALDE", "NUEVO", "CODIGO", "CÓDIGO", "NOMINAL", "LARGO", "ENVASE",
@@ -23,7 +29,28 @@ SKU_BLACKLIST = frozenset({
     "IRIDISCENTE", "BRILLANTE", "ESPECIAL", "CONTINUACIÓN", "CONTINUACION",
     "PTA", "ENVASE", "U", "TORNILLO", "PERNO", "TUERCA", "GOLILLA",
     "AUTOPERFORANTE", "AUTOP", "HEX", "HEXAGONAL", "CAB", "CABEZA",
+    # Tipos de soldadura AWS - son parte del nombre, no SKUs
+    "E6010", "E6011", "E7018", "E6010/6011/7018",
+    # Valores de PTA TORX (punta Torx) - NO son SKUs
+    "T10", "T15", "T20", "T25", "T30", "T40", "T50", "T55", "T60",
 })
+
+
+def fix_ocr_errors(sku: str) -> str:
+    """
+    Corrige errores comunes de OCR en códigos SKU.
+    
+    Problema: La letra "O" se confunde con el número "0".
+    Ejemplo: "NO4RLBC" debería ser "N04RLBC"
+    
+    Regla: Si hay un patrón "O" seguido de dígito, es probable que sea "0"+dígito.
+    """
+    if not sku:
+        return sku
+    # Reemplazar O seguido de dígito por 0 seguido de dígito
+    # Ejemplo: NO4 -> N04, O1ABC -> 01ABC
+    corrected = re.sub(r'O([0-9])', r'0\1', sku)
+    return corrected
 
 
 def looks_like_sku(token: str) -> bool:
@@ -48,6 +75,19 @@ def looks_like_sku(token: str) -> bool:
     if not re.search(r"[A-Z]", t):
         return False
     return True
+
+
+def clean_logo_text(text: str) -> str:
+    """
+    Elimina logos/marcas del texto.
+    Por ejemplo: "TORNILLO PARA ESSVE" -> "TORNILLO PARA"
+                 "ESSVE" -> ""
+    """
+    if not text:
+        return text
+    words = text.split()
+    cleaned = [w for w in words if w.upper() not in LOGO_BLACKLIST]
+    return " ".join(cleaned)
 
 
 def split_line_halves(line: str, gap_end_pos: int = 56) -> tuple[str, str]:
@@ -120,33 +160,66 @@ def parse_row_parts(parts: list[str]) -> dict[str, str] | None:
         remaining = parts[1:]
     
     # Buscar ENVASE en cualquier posición (contiene " U" o termina con "U")
-    # El formato típico es: CODIGO [NOMINAL] LARGO ENVASE [ENTRE_CARAS]
+    # El formato típico es: CODIGO [NOMINAL] LARGO ENVASE [ENTRE_CARAS/COD_TECFI]
     # ENTRE_CARAS solo existe si ENVASE estaba en penúltima posición (antes del último elemento)
     envase = ""
     envase_idx = -1
     original_len = len(remaining)
     
-    for i, part in enumerate(remaining):
-        # ENVASE típico: "500 U", "100 U", "1,000 U", "200 U b/BL2Eu"
-        if " U" in part or (part.endswith("U") and re.match(r'^[\d,\.]+\s*U$', part)):
-            envase = part
-            envase_idx = i
+    # Primero, manejar caso donde ENVASE viene separado: ['100', 'U', ...]
+    # Buscar un número seguido de 'U' suelto
+    for i in range(len(remaining) - 1):
+        if re.match(r'^[\d,\.]+$', remaining[i]) and remaining[i + 1] == 'U':
+            # Combinar número + U
+            envase = remaining[i] + ' U'
+            # Eliminar el número y la U, y todo lo que venga después (Cod Tecfi, etc.)
+            # El último elemento después de "U" es típicamente Cod Tecfi que debemos ignorar
+            if i + 2 < len(remaining):
+                # Hay algo después de "U" (como Cod Tecfi) - ignorarlo
+                remaining = remaining[:i] + remaining[i+2:i+3] if (i+3 <= len(remaining) and re.match(r'^[\d/]+$', remaining[i+2])) else remaining[:i]
+            else:
+                remaining = remaining[:i]
+            result["ENVASE"] = envase
             break
     
-    # ENTRE_CARAS solo existe si ENVASE era el penúltimo elemento original
-    # Es decir, ENVASE estaba en posición len-2 y ENTRE_CARAS en len-1
-    entre_caras = ""
-    if envase_idx >= 0:
-        # Si ENVASE era penúltimo y el último es una fracción sin ", es ENTRE_CARAS
-        if envase_idx == original_len - 2:
-            last = remaining[-1]
-            if re.match(r'^[\d/]+$', last) and '"' not in last and len(last) <= 5:
-                entre_caras = remaining.pop()
-        remaining.pop(envase_idx)
+    if not envase:
+        for i, part in enumerate(remaining):
+            # ENVASE típico: "500 U", "100 U", "1,000 U", "200 U b/BL2Eu"
+            # También puede venir con Cod Tecfi pegado: "100 U AB0106180"
+            if " U" in part:
+                # Extraer solo la parte del ENVASE (número + U)
+                envase_match = re.match(r'^([\d,\.]+\s*U)\b', part)
+                if envase_match:
+                    envase = envase_match.group(1)
+                    # El resto después de "U " es Cod Tecfi - ignorar
+                else:
+                    envase = part
+                envase_idx = i
+                break
+            elif part.endswith("U") and re.match(r'^[\d,\.]+\s*U$', part):
+                envase = part
+                envase_idx = i
+                break
+        
+        # ENTRE_CARAS solo existe si ENVASE era el penúltimo elemento original
+        # Es decir, ENVASE estaba en posición len-2 y ENTRE_CARAS en len-1
+        entre_caras = ""
+        if envase_idx >= 0:
+            # Si ENVASE era penúltimo y el último es una fracción sin ", es ENTRE_CARAS
+            if envase_idx == original_len - 2:
+                last = remaining[-1]
+                if re.match(r'^[\d/]+$', last) and '"' not in last and len(last) <= 5:
+                    entre_caras = remaining.pop()
+            remaining.pop(envase_idx)
+        
+        result["ENVASE"] = envase
+        if entre_caras:
+            result["ENTRE_CARAS"] = entre_caras
     
-    result["ENVASE"] = envase
-    if entre_caras:
-        result["ENTRE_CARAS"] = entre_caras
+    # Filtrar elementos que parezcan códigos Tecfi (SKU-like al final que no es ENTRE_CARAS)
+    # Típicamente son como "AB0106180", "TX0163080" al final
+    if remaining and looks_like_sku(remaining[-1]) and len(remaining) > 2:
+        cod_tecfi = remaining.pop()  # Ignorar Cod Tecfi
     
     # Ahora remaining tiene [NOMINAL, LARGO] o [LARGO] o [NOMINAL+LARGO combinado]
     if not remaining:
@@ -155,22 +228,30 @@ def parse_row_parts(parts: list[str]) -> dict[str, str] | None:
     if len(remaining) == 1:
         val = remaining[0]
         # Verificar si es NOMINAL + LARGO combinado (ej: "#6-9[CRS] 5/8", "#5(3.70) 60", "#10-24[3/16] 3/4")
-        # NOMINAL típico: #X-Y, #X-Y[CRS], #X(valor), #X-Y[fracción], números como M5, 5.2
+        # NOMINAL típico: #X-Y, #X-Y[CRS], #X(valor), #X-Y[fracción], números como M5, 5.2, 6.3[1/4-14]
         # LARGO típico: fracciones, medidas con ", números
-        # Patrón: # seguido de dígitos, guiones, corchetes, paréntesis, barras, decimales
+        
+        # Patrón 1: # seguido de dígitos, guiones, corchetes, paréntesis, barras, decimales
         match = re.match(r'^(#[\d\-\[\]A-Za-z\(\)\.\,\/]+)\s+(.+)$', val)
         if match:
             result["NOMINAL"] = match.group(1)
             result["LARGO"] = match.group(2)
         else:
-            # También verificar patrón M/número seguido de espacio
+            # Patrón 2: M seguido de número (métrico)
             match2 = re.match(r'^(M\d+[xX]?\d*[\.\d]*)\s+(.+)$', val)
             if match2:
                 result["NOMINAL"] = match2.group(1)
                 result["LARGO"] = match2.group(2)
             else:
-                # Asumir que es solo LARGO (NOMINAL heredado)
-                result["LARGO"] = val
+                # Patrón 3: Número con corchetes como 6.3[1/4-14] seguido de espacio y LARGO
+                # Formato: número.decimal[fracción-número] espacio largo
+                match3 = re.match(r'^([\d\.]+\[[\d/\-]+\])\s+(.+)$', val)
+                if match3:
+                    result["NOMINAL"] = match3.group(1)
+                    result["LARGO"] = match3.group(2)
+                else:
+                    # Asumir que es solo LARGO (NOMINAL heredado)
+                    result["LARGO"] = val
     
     elif len(remaining) == 2:
         result["NOMINAL"] = remaining[0]
@@ -271,8 +352,11 @@ def is_title_line(line: str) -> bool:
     # Títulos típicos
     keywords = ["TORNILLO", "PERNO", "TUERCA", "GOLILLA", "AUTOPERFORANTE", 
                 "REMACHE", "ANCLAJE", "TARUGO", "CLAVO", "BROCA", "DISCO",
-                "CADENA", "CABLE", "FRAMER", "CONECTOR", "ESSVE"]
+                "CADENA", "CABLE", "FRAMER", "CONECTOR"]
     upper = stripped.upper()
+    # Ignorar líneas que son solo logos
+    if upper in LOGO_BLACKLIST:
+        return False
     return any(kw in upper for kw in keywords)
 
 
@@ -289,6 +373,44 @@ def is_subtype_line(line: str) -> bool:
                 "INOX", "PARA", "DOS CAPAS", "DENSIDAD", "MADERA", "METAL"]
     upper = stripped.upper()
     return any(kw in upper for kw in keywords) and len(stripped) < 80
+
+
+def is_incomplete_title(title: str) -> bool:
+    """
+    Detecta si un título está incompleto y necesita continuación.
+    Por ejemplo: "TORNILLO PARA" necesita más texto.
+    """
+    if not title:
+        return False
+    words = title.strip().upper().split()
+    if not words:
+        return False
+    # Palabras que indican título incompleto
+    incomplete_endings = ["PARA", "DE", "CON", "EN", "A", "Y"]
+    return words[-1] in incomplete_endings
+
+
+def is_title_continuation(text: str) -> bool:
+    """
+    Detecta si un texto puede ser continuación de un título incompleto.
+    Por ejemplo: "TERRAZAS", "DECK", "MADERA", etc.
+    """
+    stripped = text.strip()
+    if not stripped or len(stripped) < 3 or len(stripped) > 30:
+        return False
+    upper = stripped.upper()
+    # No puede ser un header, acabado, o tener dígitos (sería datos)
+    if is_header_line(text) or is_finish_line(text):
+        return False
+    if re.search(r'\d', stripped):
+        return False
+    # No puede ser un logo
+    if upper in LOGO_BLACKLIST:
+        return False
+    # Palabras que típicamente continúan títulos
+    continuations = ["TERRAZAS", "DECK", "MADERA", "METALCON", "VOLCANITA",
+                     "FACHADAS", "MOLDURAS", "AGLOMERADA", "DRYWALL"]
+    return upper in continuations or (len(stripped) > 3 and stripped.isupper())
 
 
 def is_subtype_text(text: str) -> bool:
@@ -344,19 +466,19 @@ def parse_half(
         
         # Título de producto
         if is_title_line(line) and not looks_like_sku(stripped.split()[0] if stripped.split() else ""):
-            current_product_type = stripped
+            current_product_type = clean_logo_text(stripped)
             current_subtype = ""
             continue
         
         # Subtipo
         if is_subtype_line(line) and not looks_like_sku(stripped.split()[0] if stripped.split() else ""):
-            current_subtype = stripped
+            current_subtype = clean_logo_text(stripped)
             continue
         
         # Fila de datos
         row = parse_table_row(line, current_columns if current_columns else None)
         if row and row.get("CODIGO"):
-            sku = row["CODIGO"]
+            sku = fix_ocr_errors(row["CODIGO"])
             
             # Heredar NOMINAL si está vacío
             nominal = row.get("NOMINAL", "").strip()
@@ -537,10 +659,10 @@ def parse_spatial_catalog(text: str) -> tuple[dict[str, Any], dict[str, dict]]:
         if is_header_line(line):
             # Consolidar títulos pendientes
             if pending_title_left:
-                product_type_left = pending_title_left
+                product_type_left = clean_logo_text(pending_title_left)
                 pending_title_left = ""
             if pending_title_right:
-                product_type_right = pending_title_right
+                product_type_right = clean_logo_text(pending_title_right)
                 pending_title_right = ""
             # Solo continuar si la línea SOLO tiene header (no datos)
             # Si hay datos en un lado, procesar normalmente
@@ -560,7 +682,7 @@ def parse_spatial_catalog(text: str) -> tuple[dict[str, Any], dict[str, dict]]:
             # Detectar header en izquierda
             if is_header_line(left_part):
                 if pending_title_left:
-                    product_type_left = pending_title_left
+                    product_type_left = clean_logo_text(pending_title_left)
                     pending_title_left = ""
                 last_nominal_left = ""
                 # Resetear subtipo cuando hay nueva tabla (nuevo header)
@@ -577,6 +699,9 @@ def parse_spatial_catalog(text: str) -> tuple[dict[str, Any], dict[str, dict]]:
                     pending_title_left += " " + left_stripped
                 else:
                     pending_title_left = left_stripped
+            # Detectar continuación de título incompleto (ej: "TERRAZAS" después de "TORNILLO PARA")
+            elif pending_title_left and is_incomplete_title(pending_title_left) and is_title_continuation(left_stripped):
+                pending_title_left += " " + left_stripped
             # Detectar subtipo en izquierda
             elif is_subtype_text(left_stripped) and not looks_like_sku(left_stripped.split()[0] if left_stripped.split() else ""):
                 if pending_title_left:
@@ -587,7 +712,7 @@ def parse_spatial_catalog(text: str) -> tuple[dict[str, Any], dict[str, dict]]:
             else:
                 row_left = parse_table_row(left_part)
                 if row_left and row_left.get("CODIGO"):
-                    sku = row_left["CODIGO"]
+                    sku = fix_ocr_errors(row_left["CODIGO"])
                     nominal = row_left.get("NOMINAL", "").strip()
                     if nominal:
                         last_nominal_left = nominal
@@ -603,7 +728,7 @@ def parse_spatial_catalog(text: str) -> tuple[dict[str, Any], dict[str, dict]]:
             # Detectar header en derecha
             if is_header_line(right_part):
                 if pending_title_right:
-                    product_type_right = pending_title_right
+                    product_type_right = clean_logo_text(pending_title_right)
                     pending_title_right = ""
                 last_nominal_right = ""
                 # Resetear subtipo cuando hay nueva tabla (nuevo header)
@@ -621,6 +746,9 @@ def parse_spatial_catalog(text: str) -> tuple[dict[str, Any], dict[str, dict]]:
                     pending_title_right += " " + right_stripped
                 else:
                     pending_title_right = right_stripped
+            # Detectar continuación de título incompleto (ej: "DECK DE MADERA" después de "TORNILLO PARA")
+            elif pending_title_right and is_incomplete_title(pending_title_right) and is_title_continuation(right_stripped):
+                pending_title_right += " " + right_stripped
             # Detectar subtipo en derecha
             elif is_subtype_text(right_stripped) and not looks_like_sku(right_stripped.split()[0] if right_stripped.split() else ""):
                 if pending_title_right:
@@ -631,7 +759,7 @@ def parse_spatial_catalog(text: str) -> tuple[dict[str, Any], dict[str, dict]]:
             else:
                 row_right = parse_table_row(right_part)
                 if row_right and row_right.get("CODIGO"):
-                    sku = row_right["CODIGO"]
+                    sku = fix_ocr_errors(row_right["CODIGO"])
                     nominal = row_right.get("NOMINAL", "").strip()
                     if nominal:
                         last_nominal_right = nominal
