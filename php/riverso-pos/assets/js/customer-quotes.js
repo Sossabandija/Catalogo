@@ -6,7 +6,10 @@
         quote: emptyQuote(),
         snapshot: "",
         results: [],
-        advanced: false
+        advanced: false,
+        lupaScope: "todo",
+        lupaResults: [],
+        lupaSearched: false
     };
 
     var els = {
@@ -36,6 +39,11 @@
         search: document.getElementById("cq-search"),
         advanced: document.getElementById("cq-advanced"),
         results: document.getElementById("cq-results"),
+        lupa: document.getElementById("cq-lupa"),
+        lupaDialog: document.getElementById("cq-lupa-dialog"),
+        lupaQuery: document.getElementById("cq-lupa-query"),
+        lupaResults: document.getElementById("cq-lupa-results"),
+        lupaMessage: document.getElementById("cq-lupa-message"),
         lines: document.getElementById("cq-lines"),
         linesEmpty: document.getElementById("cq-lines-empty"),
         message: document.getElementById("cq-message"),
@@ -57,6 +65,40 @@
             searchProducts();
         }
     });
+    if (els.lupa) {
+        els.lupa.addEventListener("click", openLupa);
+    }
+    if (els.lupaDialog) {
+        document.getElementById("cq-lupa-close").addEventListener("click", closeLupa);
+        document.getElementById("cq-lupa-search").addEventListener("click", searchAdvanced);
+        els.lupaQuery.addEventListener("keydown", function (event) {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                searchAdvanced();
+            }
+        });
+        els.lupaDialog.querySelectorAll("[data-scope]").forEach(function (button) {
+            button.addEventListener("click", function () {
+                setLupaScope(button.getAttribute("data-scope") || "todo");
+            });
+        });
+        els.lupaDialog.addEventListener("click", function (event) {
+            if (event.target === els.lupaDialog) {
+                closeLupa();
+            }
+        });
+        els.lupaDialog.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                closeLupa();
+            }
+        });
+        els.lupaDialog.addEventListener("close", function () {
+            if (state.view === "editor" && els.lupa) {
+                els.lupa.focus();
+            }
+        });
+    }
     els.filter.addEventListener("change", loadList);
     if (els.typeFilter) {
         els.typeFilter.addEventListener("change", loadList);
@@ -126,6 +168,9 @@
 
     function showList() {
         state.view = "list";
+        if (els.lupaDialog && els.lupaDialog.open) {
+            els.lupaDialog.close();
+        }
         els.listView.hidden = false;
         els.editorView.hidden = true;
         loadList();
@@ -240,6 +285,12 @@
             input.disabled = !editable;
         });
         document.getElementById("cq-search-btn").disabled = !editable;
+        if (els.lupa) {
+            els.lupa.disabled = !editable;
+        }
+        if (!editable && els.lupaDialog && els.lupaDialog.open) {
+            els.lupaDialog.close();
+        }
         els.save.hidden = !editable;
         els.clear.hidden = !editable;
         var transition = (quote.allowed_transitions || [])[0];
@@ -549,30 +600,143 @@
         els.results.innerHTML = "";
         els.results.hidden = state.results.length === 0;
         state.results.forEach(function (product) {
-            var li = document.createElement("li");
-            var info = document.createElement("div");
-            var sku = document.createElement("div");
-            sku.className = "cq-result-sku";
-            sku.textContent = product.sku + " · " + (product.description || "");
-            var meta = document.createElement("div");
-            meta.className = "cq-result-meta";
-            meta.textContent = "Proveedor " + (product.supplier_code || "—") + " · Barras " + (product.barcode || "—");
-            info.appendChild(sku);
-            info.appendChild(meta);
-            var add = document.createElement("button");
-            add.type = "button";
-            add.className = "cq-btn";
-            add.textContent = "Agregar";
-            add.addEventListener("click", function () {
-                addProduct(product);
-            });
-            li.appendChild(info);
-            li.appendChild(add);
-            els.results.appendChild(li);
+            els.results.appendChild(resultItem(product, function (item) {
+                addProduct(item);
+            }, false));
         });
     }
 
-    function addProduct(product) {
+    function openLupa() {
+        if (state.quote.editable === false || !els.lupaDialog) {
+            return;
+        }
+        state.lupaResults = [];
+        state.lupaSearched = false;
+        if (els.lupaQuery) {
+            els.lupaQuery.disabled = false;
+            els.lupaQuery.readOnly = false;
+            els.lupaQuery.value = els.search ? els.search.value : "";
+        }
+        setLupaScope("todo");
+        renderLupaResults();
+        setLupaMessage("");
+        if (typeof els.lupaDialog.showModal === "function") {
+            if (!els.lupaDialog.open) {
+                els.lupaDialog.showModal();
+            }
+        } else {
+            els.lupaDialog.setAttribute("open", "open");
+        }
+        if (els.lupaQuery) {
+            els.lupaQuery.focus();
+        }
+    }
+
+    function closeLupa() {
+        if (!els.lupaDialog) {
+            return;
+        }
+        if (typeof els.lupaDialog.close === "function" && els.lupaDialog.open) {
+            els.lupaDialog.close();
+            return;
+        }
+        els.lupaDialog.removeAttribute("open");
+    }
+
+    function setLupaScope(scope) {
+        state.lupaScope = scope === "descripcion" || scope === "codigos" ? scope : "todo";
+        if (!els.lupaDialog) {
+            return;
+        }
+        els.lupaDialog.querySelectorAll("[data-scope]").forEach(function (button) {
+            var on = button.getAttribute("data-scope") === state.lupaScope;
+            button.classList.toggle("is-active", on);
+            button.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        if (els.lupaQuery) {
+            var placeholder = "Descripción, SKU, código proveedor o código de barras";
+            if (state.lupaScope === "descripcion") {
+                placeholder = "Descripción del producto";
+            } else if (state.lupaScope === "codigos") {
+                placeholder = "SKU, código proveedor o código de barras";
+            }
+            els.lupaQuery.placeholder = placeholder;
+        }
+        if (state.lupaSearched && els.lupaQuery && els.lupaQuery.value.trim() !== "") {
+            searchAdvanced();
+        }
+    }
+
+    function searchAdvanced() {
+        var query = els.lupaQuery.value.trim();
+        if (!query) {
+            state.lupaResults = [];
+            state.lupaSearched = false;
+            renderLupaResults();
+            setLupaMessage("Escribe qué producto buscar.", true);
+            return;
+        }
+        setLupaMessage("");
+        post(cfg.actions.search, { q: query, mode: "advanced", scope: state.lupaScope }).then(function (data) {
+            state.lupaSearched = true;
+            state.lupaResults = data.products || [];
+            renderLupaResults();
+            if (state.lupaResults.length === 0) {
+                setLupaMessage("Sin resultados para «" + query + "».", true);
+            }
+        }).catch(function (error) {
+            setLupaMessage(error.message, true);
+        });
+    }
+
+    function renderLupaResults() {
+        if (!els.lupaResults) {
+            return;
+        }
+        els.lupaResults.innerHTML = "";
+        els.lupaResults.hidden = state.lupaResults.length === 0;
+        state.lupaResults.forEach(function (product) {
+            els.lupaResults.appendChild(resultItem(product, function (item) {
+                addProduct(item, "lupa");
+            }, true));
+        });
+    }
+
+    function resultItem(product, onAdd, withPrice) {
+        var li = document.createElement("li");
+        var info = document.createElement("div");
+        var sku = document.createElement("div");
+        sku.className = "cq-result-sku";
+        sku.textContent = product.sku + " · " + (product.description || "");
+        var meta = document.createElement("div");
+        meta.className = "cq-result-meta";
+        meta.textContent = "Proveedor " + (product.supplier_code || "—") + " · Barras " + (product.barcode || "—");
+        if (withPrice) {
+            meta.textContent += " · " + formatMoney(product.unit_price || 0);
+        }
+        info.appendChild(sku);
+        info.appendChild(meta);
+        var add = document.createElement("button");
+        add.type = "button";
+        add.className = "cq-btn";
+        add.textContent = "Agregar";
+        add.addEventListener("click", function () {
+            onAdd(product);
+        });
+        li.appendChild(info);
+        li.appendChild(add);
+        return li;
+    }
+
+    function setLupaMessage(text, isError) {
+        if (!els.lupaMessage) {
+            return;
+        }
+        els.lupaMessage.textContent = text || "";
+        els.lupaMessage.className = "cq-message" + (text ? (isError ? " is-error" : " is-ok") : "");
+    }
+
+    function addProduct(product, source) {
         var lines = state.quote.lines;
         var sku = String(product.sku || "").toLowerCase();
         var existing = lines.find(function (line) {
@@ -595,10 +759,15 @@
                 discount_amount: 0
             });
         }
-        els.results.hidden = true;
+        if (source !== "lupa") {
+            els.results.hidden = true;
+        }
         renderLines();
         renderTotals();
         setMessage("Producto agregado.", false);
+        if (source === "lupa") {
+            setLupaMessage("Producto agregado. La cotización ya tiene la línea.", false);
+        }
     }
 
     function saveQuote() {

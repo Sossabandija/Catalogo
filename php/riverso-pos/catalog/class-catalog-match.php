@@ -1,7 +1,9 @@
 <?php
 /**
- * Coincidencia de búsqueda rápida.
- * Exacta, luego prefijo (desde 2 caracteres) y contiene (desde 4).
+ * Coincidencia de catálogo.
+ * Exacta, luego prefijo (desde 2 caracteres) y contiene
+ * (desde 4 en códigos, desde 2 en descripción).
+ * Ignora mayúsculas y acentos del español.
  */
 
 declare(strict_types=1);
@@ -12,14 +14,14 @@ final class Riverso_POS_Catalog_Match {
      * @param list<string> $fields
      */
     public static function score(array $product, array $fields, string $query): ?int {
-        $needle = self::lower(trim($query));
+        $needle = self::fold(trim($query));
         if ($needle === '') {
             return null;
         }
         $best = null;
         $length = function_exists('mb_strlen') ? mb_strlen($needle, 'UTF-8') : strlen($needle);
         foreach ($fields as $field) {
-            $value = self::lower(trim((string) ($product[$field] ?? '')));
+            $value = self::fold(trim((string) ($product[$field] ?? '')));
             if ($value === '') {
                 continue;
             }
@@ -28,7 +30,7 @@ final class Riverso_POS_Catalog_Match {
                 $score = 0;
             } elseif ($length >= 2 && str_starts_with($value, $needle)) {
                 $score = 1;
-            } elseif ($length >= 4 && str_contains($value, $needle)) {
+            } elseif ($length >= self::contains_from($field) && str_contains($value, $needle)) {
                 $score = 2;
             }
             if ($score !== null) {
@@ -59,7 +61,19 @@ final class Riverso_POS_Catalog_Match {
         ];
     }
 
-    private static function lower(string $value): string {
-        return function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value);
+    private static function contains_from(string $field): int {
+        return $field === 'description' ? 2 : 4;
+    }
+
+    private static function fold(string $value): string {
+        $value = function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value);
+        return strtr($value, [
+            'á' => 'a', 'à' => 'a', 'ä' => 'a', 'â' => 'a',
+            'é' => 'e', 'è' => 'e', 'ë' => 'e', 'ê' => 'e',
+            'í' => 'i', 'ì' => 'i', 'ï' => 'i', 'î' => 'i',
+            'ó' => 'o', 'ò' => 'o', 'ö' => 'o', 'ô' => 'o',
+            'ú' => 'u', 'ù' => 'u', 'ü' => 'u', 'û' => 'u',
+            'ñ' => 'n',
+        ]);
     }
 }

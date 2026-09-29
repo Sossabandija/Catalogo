@@ -21,6 +21,7 @@ require_once __DIR__ . '/../catalog/class-woo-catalog-reader.php';
 require_once __DIR__ . '/../catalog/products/class-product-lookup.php';
 require_once __DIR__ . '/../catalog/barcodes/class-barcode-lookup.php';
 require_once __DIR__ . '/../catalog/suppliers/class-supplier-code-lookup.php';
+require_once __DIR__ . '/../catalog/descriptions/class-description-lookup.php';
 require_once __DIR__ . '/../catalog/class-catalog-product-lookup.php';
 require_once __DIR__ . '/../sales/customer_quotes/class-customer-quote-module.php';
 require_once __DIR__ . '/../portal/class-customer-quotes-portal.php';
@@ -45,7 +46,8 @@ function riverso_pos_catalog_lookup(Riverso_POS_Catalog_Reader $reader): Riverso
     return new Riverso_POS_Catalog_Product_Lookup(
         new Riverso_POS_Product_Lookup($reader),
         new Riverso_POS_Barcode_Lookup($reader),
-        new Riverso_POS_Supplier_Code_Lookup($reader)
+        new Riverso_POS_Supplier_Code_Lookup($reader),
+        new Riverso_POS_Description_Lookup($reader)
     );
 }
 
