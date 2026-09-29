@@ -170,6 +170,16 @@ foreach ($list as $row) {
 check($by_number[$saved['quote_number']]['line_count'] === 1, 'la lista cuenta las líneas');
 check($by_number[$saved['quote_number']]['status_label'] === 'Borrador', 'la lista muestra Borrador');
 check($by_number[$second['quote_number']]['customer_name'] === 'Local', 'la lista muestra el cliente');
+check($edited['issue_date'] === $edited['created_at'] && $edited['issue_date'] !== '', 'la emisión es la fecha de creación');
+check($edited['is_expired'] === false && $second['is_expired'] === false, 'sin vencer no marca vencida');
+check($edited['seller_name'] === '', 'sin campo de vendedor el nombre queda vacío');
+check(is_float($by_number[$saved['quote_number']]['margin_percent']), 'la lista incluye la utilidad porcentual');
+$issued = substr((string) $edited['created_at'], 0, 10);
+$only_ref = $repo->list_quotes(['quote_type' => 'referencia']);
+check(count($only_ref) === 1 && $only_ref[0]['quote_number'] === $saved['quote_number'], 'filtra tipo referencia');
+$only_venta = $repo->list_quotes(['quote_type' => 'venta', 'date_from' => $issued, 'date_to' => $issued]);
+check(count($only_venta) === 1 && $only_venta[0]['customer_name'] === 'Local', 'filtra tipo y fecha');
+check($repo->list_quotes(['date_from' => '1999-01-01', 'date_to' => '1999-01-02']) === [], 'un rango vacío no devuelve cotizaciones');
 
 $threw = false;
 try {
@@ -198,6 +208,32 @@ try {
     $bad_qty = true;
 }
 check($bad_qty, 'cantidad cero no se guarda');
+
+$fresh->update($fresh->table('customer_quotes'), [
+    'created_at' => '2020-01-01 08:00:00',
+], 'id = ?', [(int) $edited['id']]);
+$expired = $repo->find((int) $edited['id']);
+check($expired !== null && $expired['is_expired'] === true, 'marca vencida si la emisión más la validez ya pasó');
+check($expired['issue_date'] === '2020-01-01 08:00:00', 'la emisión sigue a created_at');
+
+echo "== portal ==\n";
+ob_start();
+(new Riverso_POS_Customer_Quote_Module(new Riverso_POS_Customer_Quote_Repository($fresh), catalog(), false))->render([
+    'ajaxUrl' => '/ajax',
+    'nonce' => 'test',
+    'assetBase' => '/assets',
+    'standalone' => true,
+    'currentUserName' => 'Vendedor local',
+]);
+$html = (string) ob_get_clean();
+check(str_contains($html, 'id="cq-quote-number"') && str_contains($html, 'readonly'), 'cabecera con número de solo lectura');
+check(str_contains($html, 'id="cq-issue-date"') && str_contains($html, 'id="cq-seller"'), 'cabecera con emisión y vendedor');
+check(str_contains($html, 'Vendedor local'), 'el portal recibe el vendedor actual');
+check(str_contains($html, 'id="cq-type-filter"') && str_contains($html, 'id="cq-date-from"') && str_contains($html, 'id="cq-apply-filters"'), 'filtros de tipo y fecha');
+check(str_contains($html, 'Utilidad %'), 'columna de utilidad');
+check(str_contains($html, 'id="cq-pdf"') && str_contains($html, 'id="cq-options"'), 'controles PDF y Opciones');
+$js = (string) file_get_contents(dirname(__DIR__) . '/assets/js/customer-quotes.js');
+check(str_contains($js, 'cq-qty-stepper') && str_contains($js, 'PDF de cotización: próximamente (stub P1b).'), 'steppers y stub PDF');
 
 echo "== catálogo ==\n";
 $lookup = catalog();

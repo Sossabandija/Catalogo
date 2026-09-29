@@ -51,4 +51,5 @@ $module->render([
     'nonce' => 'dev',
     'assetBase' => '/assets',
     'standalone' => true,
+    'currentUserName' => 'Vendedor local',
 ]);
