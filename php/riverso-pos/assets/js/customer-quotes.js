@@ -316,6 +316,19 @@
         else if (field === "unit_price") line.unit_price = parsed;
         else if (field === "price_discount") line.price_discount = parsed;
         else if (field === "margin_discount") line.margin_discount = parsed;
+        syncDiscountAmount(line, field);
+    }
+
+    function syncDiscountAmount(line, field) {
+        var priceRate = clampRate(line.price_discount);
+        var marginRate = clampRate(line.margin_discount);
+        if (priceRate > 0 || marginRate > 0) {
+            line.discount_amount = lineFigures(line).discount;
+            return;
+        }
+        if (field === "price_discount" || field === "margin_discount") {
+            line.discount_amount = 0;
+        }
     }
 
     function syncHeader() {

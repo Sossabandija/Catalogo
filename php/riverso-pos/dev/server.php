@@ -19,6 +19,7 @@ if (str_starts_with($uri, '/assets/')) {
     }
     $ext = pathinfo($path, PATHINFO_EXTENSION);
     header('Content-Type: ' . ($ext === 'css' ? 'text/css' : 'text/javascript') . '; charset=utf-8');
+    header('Cache-Control: no-store');
     readfile($path);
     exit;
 }
