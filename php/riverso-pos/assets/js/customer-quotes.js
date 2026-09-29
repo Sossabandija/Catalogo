@@ -14,9 +14,21 @@
         listBody: document.getElementById("cq-list-body"),
         empty: document.getElementById("cq-empty"),
         filter: document.getElementById("cq-status-filter"),
+        typeFilter: document.getElementById("cq-type-filter"),
+        dateFrom: document.getElementById("cq-date-from"),
+        dateTo: document.getElementById("cq-date-to"),
         listMessage: document.getElementById("cq-list-message"),
         title: document.getElementById("cq-editor-title"),
         status: document.getElementById("cq-status"),
+        expired: document.getElementById("cq-expired"),
+        number: document.getElementById("cq-number"),
+        issued: document.getElementById("cq-issued"),
+        seller: document.getElementById("cq-seller"),
+        pdf: document.getElementById("cq-pdf"),
+        options: document.getElementById("cq-options"),
+        optionsMenu: document.getElementById("cq-options-menu"),
+        optionsWrap: document.getElementById("cq-options-wrap"),
+        optionsPdf: document.getElementById("cq-options-pdf"),
         customer: document.getElementById("cq-customer"),
         type: document.getElementById("cq-type"),
         validityDays: document.getElementById("cq-validity-days"),
@@ -46,7 +58,23 @@
             searchProducts();
         }
     });
-    els.filter.addEventListener("change", renderList);
+    [els.filter, els.typeFilter, els.dateFrom, els.dateTo].forEach(function (input) {
+        input.addEventListener("change", loadList);
+    });
+    els.pdf.addEventListener("click", exportPdf);
+    els.options.addEventListener("click", toggleOptions);
+    els.optionsPdf.addEventListener("click", exportPdf);
+    document.addEventListener("click", function (event) {
+        if (els.optionsWrap && els.optionsWrap.contains(event.target)) {
+            return;
+        }
+        closeOptions();
+    });
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") {
+            closeOptions();
+        }
+    });
     els.save.addEventListener("click", saveQuote);
     els.clear.addEventListener("click", clearQuote);
     els.transition.addEventListener("click", transitionQuote);
@@ -60,11 +88,14 @@
     showList();
 
     function emptyQuote() {
+        var seller = cfg.seller || {};
         return {
             id: null,
             quote_number: "",
             customer_id: null,
             customer_name: "",
+            seller_id: seller.id || null,
+            seller_name: seller.name || "",
             quote_type: "venta",
             status: "draft",
             status_label: "Borrador",
@@ -74,6 +105,9 @@
             discount_total: 0,
             margin_percent: null,
             profit_total: null,
+            issued_at: "",
+            created_at: "",
+            expired: false,
             editable: true,
             allowed_transitions: [],
             lines: []
@@ -100,8 +134,32 @@
         state.snapshot = serialize(state.quote);
     }
 
+    function listFilters() {
+        var fields = {};
+        if (els.filter.value && els.filter.value !== "all") {
+            fields.status = els.filter.value;
+        }
+        if (els.typeFilter.value && els.typeFilter.value !== "all") {
+            fields.quote_type = els.typeFilter.value;
+        }
+        if (els.dateFrom.value) {
+            fields.date_from = els.dateFrom.value;
+        }
+        if (els.dateTo.value) {
+            fields.date_to = els.dateTo.value;
+        }
+        return fields;
+    }
+
     function loadList() {
-        post(cfg.actions.list, {}).then(function (data) {
+        if (els.dateFrom.value && els.dateTo.value && els.dateFrom.value > els.dateTo.value) {
+            state.quotes = [];
+            renderList();
+            setListMessage("La fecha desde no puede ser posterior a la fecha hasta.", true);
+            return;
+        }
+        setListMessage("");
+        post(cfg.actions.list, listFilters()).then(function (data) {
             state.quotes = data.quotes || [];
             renderList();
         }).catch(function (error) {
@@ -109,23 +167,48 @@
         });
     }
 
+    function matchesListFilters(quote) {
+        if (els.filter.value !== "all" && quote.status !== els.filter.value) {
+            return false;
+        }
+        if (els.typeFilter.value !== "all" && quote.quote_type !== els.typeFilter.value) {
+            return false;
+        }
+        var issued = String(quote.issued_at || quote.created_at || "").slice(0, 10);
+        if (els.dateFrom.value && (!issued || issued < els.dateFrom.value)) {
+            return false;
+        }
+        if (els.dateTo.value && (!issued || issued > els.dateTo.value)) {
+            return false;
+        }
+        return true;
+    }
+
     function renderList() {
-        var filter = els.filter.value;
-        var rows = state.quotes.filter(function (quote) {
-            return filter === "all" || quote.status === filter;
-        });
+        var filtering = els.filter.value !== "all" || els.typeFilter.value !== "all" || els.dateFrom.value || els.dateTo.value;
+        var rows = state.quotes.filter(matchesListFilters);
         els.listBody.innerHTML = "";
         els.empty.hidden = rows.length !== 0;
+        els.empty.textContent = filtering
+            ? "Ninguna cotización coincide con los filtros."
+            : "No hay cotizaciones. Crea la primera.";
         rows.forEach(function (quote) {
+            var expired = isExpired(quote);
             var tr = document.createElement("tr");
+            if (expired) {
+                tr.className = "is-expired";
+            }
             tr.appendChild(cell(quote.quote_number));
-            tr.appendChild(cell(formatDate(quote.updated_at)));
+            tr.appendChild(cell(formatDate(quote.issued_at || quote.created_at || quote.updated_at)));
             tr.appendChild(cell(quote.customer_name || "Sin cliente"));
             tr.appendChild(cell(quote.quote_type_label || "Venta"));
-            tr.appendChild(badgeCell(quote.status, quote.status_label));
+            tr.appendChild(badgeCell(quote.status, quote.status_label, expired));
             var net = cell(formatMoney(quote.net_total));
             net.className = "cq-num";
             tr.appendChild(net);
+            var utility = cell(formatPercent(quote.margin_percent));
+            utility.className = "cq-num";
+            tr.appendChild(utility);
             var actions = document.createElement("td");
             var open = document.createElement("button");
             open.type = "button";
@@ -153,6 +236,10 @@
         els.title.textContent = quote.quote_number || "Nueva cotización";
         els.status.textContent = quote.status_label || "Borrador";
         els.status.className = "cq-badge cq-badge-" + (quote.status || "draft");
+        els.number.value = quote.quote_number || "";
+        els.number.placeholder = quote.quote_number ? "" : "Se asigna al guardar";
+        els.issued.value = formatDate(quote.issued_at || quote.created_at || cfg.today || "");
+        els.seller.value = quote.seller_name || (cfg.seller && cfg.seller.name) || "";
         els.customer.value = quote.customer_name || "";
         els.type.value = quote.quote_type || "venta";
         els.validityDays.value = quote.validity_days === null || quote.validity_days === undefined ? "" : String(quote.validity_days);
@@ -174,6 +261,7 @@
         }
         renderLines();
         renderTotals();
+        paintExpired();
         if (quote.status === "invoiced") {
             setMessage("Esta cotización está facturada y no se edita en este corte.", true);
         }
@@ -197,7 +285,7 @@
             detail.appendChild(sku);
             detail.appendChild(desc);
             tr.appendChild(detail);
-            tr.appendChild(inputCell(line, index, "quantity", editable));
+            tr.appendChild(quantityCell(line, index, editable));
             tr.appendChild(inputCell(line, index, "unit_price", editable));
             var actions = document.createElement("td");
             actions.className = "cq-actions";
@@ -234,9 +322,60 @@
         });
     }
 
+    function quantityCell(line, index, editable) {
+        var td = document.createElement("td");
+        td.className = "cq-num";
+        var wrap = document.createElement("div");
+        wrap.className = "cq-stepper";
+        if (editable) {
+            var minus = stepButton("−", "Disminuir cantidad de " + line.sku, function () {
+                stepLine(index, -1);
+            });
+            minus.disabled = (Number(line.quantity) || 0) <= 1;
+            wrap.appendChild(minus);
+        }
+        wrap.appendChild(buildNumberInput(line, index, "quantity", editable));
+        if (editable) {
+            wrap.appendChild(stepButton("+", "Aumentar cantidad de " + line.sku, function () {
+                stepLine(index, 1);
+            }));
+        }
+        td.appendChild(wrap);
+        return td;
+    }
+
+    function stepButton(label, aria, onClick) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "cq-step";
+        button.textContent = label;
+        button.setAttribute("aria-label", aria);
+        button.addEventListener("click", onClick);
+        return button;
+    }
+
+    function stepLine(index, delta) {
+        var line = state.quote.lines[index];
+        if (!line || state.quote.editable === false) {
+            return;
+        }
+        var next = round3((Number(line.quantity) || 0) + delta);
+        if (next <= 0) {
+            return;
+        }
+        line.quantity = next;
+        renderLines();
+        renderTotals();
+    }
+
     function inputCell(line, index, field, editable) {
         var td = document.createElement("td");
         td.className = "cq-num";
+        td.appendChild(buildNumberInput(line, index, field, editable));
+        return td;
+    }
+
+    function buildNumberInput(line, index, field, editable) {
         var input = document.createElement("input");
         input.type = "text";
         input.inputMode = "decimal";
@@ -263,14 +402,17 @@
             if (field === "quantity") {
                 state.quote.lines[index].quantity = parsed;
                 input.value = formatQty(parsed);
+                var minus = input.parentNode ? input.parentNode.querySelector(".cq-step") : null;
+                if (minus) {
+                    minus.disabled = parsed <= 1;
+                }
             } else {
                 state.quote.lines[index].unit_price = parsed;
                 input.value = formatPlain(parsed);
             }
             renderTotals();
         });
-        td.appendChild(input);
-        return td;
+        return input;
     }
 
     function syncHeader() {
@@ -278,6 +420,7 @@
         state.quote.quote_type = els.type.value;
         state.quote.validity_days = els.validityDays.value === "" ? null : Number(els.validityDays.value);
         state.quote.validity_terms = els.validityTerms.value.trim();
+        paintExpired();
     }
 
     function renderTotals() {
@@ -376,6 +519,8 @@
             id: state.quote.id,
             customer_id: state.quote.customer_id,
             customer_name: state.quote.customer_name,
+            seller_id: state.quote.seller_id || (cfg.seller && cfg.seller.id) || null,
+            seller_name: state.quote.seller_name || (cfg.seller && cfg.seller.name) || "",
             quote_type: state.quote.quote_type,
             validity_days: state.quote.validity_days,
             validity_terms: state.quote.validity_terms,
@@ -575,13 +720,87 @@
         return td;
     }
 
-    function badgeCell(status, label) {
+    function badgeCell(status, label, expired) {
         var td = document.createElement("td");
         var span = document.createElement("span");
         span.className = "cq-badge cq-badge-" + status;
         span.textContent = label;
         td.appendChild(span);
+        if (expired) {
+            var mark = document.createElement("span");
+            mark.className = "cq-badge cq-badge-expired";
+            mark.textContent = "Vencida";
+            td.appendChild(mark);
+        }
         return td;
+    }
+
+    function paintExpired() {
+        var expired = isExpired(state.quote);
+        state.quote.expired = expired;
+        els.expired.hidden = !expired;
+    }
+
+    function isExpired(quote) {
+        var days = quote.validity_days;
+        if (days === null || days === undefined || days === "") {
+            return false;
+        }
+        var issued = String(quote.issued_at || quote.created_at || (!quote.id ? cfg.today : "") || "").slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(issued)) {
+            return !!quote.expired;
+        }
+        var today = String(cfg.today || "").slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) {
+            return !!quote.expired;
+        }
+        var expiry = addDays(issued, Number(days));
+        return expiry !== "" && expiry < today;
+    }
+
+    function addDays(iso, days) {
+        var count = Number(days);
+        if (!Number.isFinite(count)) {
+            return "";
+        }
+        var parts = iso.split("-");
+        var utc = Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        var date = new Date(utc + Math.round(count) * 86400000);
+        if (Number.isNaN(date.getTime())) {
+            return "";
+        }
+        return date.toISOString().slice(0, 10);
+    }
+
+    function toggleOptions() {
+        var willOpen = els.optionsMenu.hidden;
+        els.optionsMenu.hidden = !willOpen;
+        els.options.setAttribute("aria-expanded", willOpen ? "true" : "false");
+    }
+
+    function closeOptions() {
+        if (!els.optionsMenu || !els.optionsMenu.hidden) {
+            if (els.optionsMenu) {
+                els.optionsMenu.hidden = true;
+            }
+            if (els.options) {
+                els.options.setAttribute("aria-expanded", "false");
+            }
+        }
+    }
+
+    function exportPdf() {
+        closeOptions();
+        var template = cfg.printUrl || "";
+        if (!template) {
+            setMessage("La exportación PDF todavía no está disponible.", true);
+            return;
+        }
+        if (!state.quote.id) {
+            setMessage("Guarda la cotización antes de exportar el PDF.", true);
+            return;
+        }
+        window.open(template.split("{id}").join(String(state.quote.id)), "_blank", "noopener");
     }
 
     function setMessage(text, isError) {

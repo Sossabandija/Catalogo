@@ -59,6 +59,18 @@ final class Riverso_POS_Customer_Quote_Module {
      * @param array<string, mixed> $config
      */
     public function render(array $config): void {
+        $seller = $this->current_seller();
+        if (isset($config['sellerName']) && is_string($config['sellerName']) && trim($config['sellerName']) !== '') {
+            $seller['name'] = trim($config['sellerName']);
+        }
+        if (array_key_exists('sellerId', $config)) {
+            $seller_id = $config['sellerId'];
+            $seller['id'] = $seller_id === null || $seller_id === '' ? null : (int) $seller_id;
+        }
+        unset($config['sellerName'], $config['sellerId']);
+        $config['seller'] = $seller;
+        $config['today'] = Riverso_POS_Quote_Expiry::today();
+        $config['printUrl'] = $this->print_url();
         $config['actions'] = [
             'list' => 'riverso_cq_list',
             'get' => 'riverso_cq_get',
@@ -84,12 +96,29 @@ final class Riverso_POS_Customer_Quote_Module {
 
     public function ajax_list(): void {
         $this->authorize();
-        $status = $this->post_string('status');
         $filters = [];
+        $status = $this->post_string('status');
         if ($status !== '' && $status !== 'all') {
             $filters['status'] = $status;
         }
-        $this->ok(['quotes' => $this->quotes->list_quotes($filters)]);
+        $type = $this->post_string('quote_type');
+        if ($type !== '' && $type !== 'all') {
+            $filters['quote_type'] = $type;
+        }
+        $from = $this->post_string('date_from');
+        if ($from !== '') {
+            $filters['date_from'] = $from;
+        }
+        $to = $this->post_string('date_to');
+        if ($to !== '') {
+            $filters['date_to'] = $to;
+        }
+        try {
+            $quotes = $this->quotes->list_quotes($filters);
+        } catch (Riverso_POS_Quote_Exception $error) {
+            $this->fail($error->getMessage());
+        }
+        $this->ok(['quotes' => $quotes]);
     }
 
     public function ajax_get(): void {
@@ -109,6 +138,7 @@ final class Riverso_POS_Customer_Quote_Module {
         if (!is_array($data)) {
             $this->fail('No se pudo leer la cotización.');
         }
+        $data = $this->apply_seller($data);
         try {
             $quote = $this->quotes->save($data);
         } catch (Riverso_POS_Quote_Exception $error) {
@@ -137,6 +167,71 @@ final class Riverso_POS_Customer_Quote_Module {
         $this->authorize();
         $query = $this->post_string('q');
         $this->ok(['products' => $this->catalog->search($query, 20)]);
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private function apply_seller(array $data): array {
+        $name = trim((string) ($data['seller_name'] ?? ''));
+        if ($name !== '') {
+            $data['seller_name'] = $name;
+            return $data;
+        }
+        $seller = $this->current_seller();
+        if ($seller['name'] === '') {
+            return $data;
+        }
+        $data['seller_name'] = $seller['name'];
+        if (!isset($data['seller_id']) || $data['seller_id'] === '' || $data['seller_id'] === null) {
+            $data['seller_id'] = $seller['id'];
+        }
+        return $data;
+    }
+
+    /**
+     * @return array{id: int|null, name: string}
+     */
+    private function current_seller(): array {
+        if (!function_exists('wp_get_current_user')) {
+            return ['id' => null, 'name' => ''];
+        }
+        $user = wp_get_current_user();
+        if (!is_object($user)) {
+            return ['id' => null, 'name' => ''];
+        }
+        $id = isset($user->ID) ? (int) $user->ID : 0;
+        $name = '';
+        if (isset($user->display_name) && is_string($user->display_name)) {
+            $name = trim($user->display_name);
+        }
+        if ($name === '' && isset($user->user_login) && is_string($user->user_login)) {
+            $name = trim($user->user_login);
+        }
+        return [
+            'id' => $id > 0 ? $id : null,
+            'name' => $name,
+        ];
+    }
+
+    /**
+     * Este corte no trae motor PDF. Si Riverso publica una URL de impresión, se usa.
+     */
+    private function print_url(): string {
+        if (function_exists('riverso_pos_quote_print_url')) {
+            $url = riverso_pos_quote_print_url();
+            if (is_string($url)) {
+                return $url;
+            }
+        }
+        if (function_exists('apply_filters')) {
+            $filtered = apply_filters('riverso_pos_quote_print_url', '');
+            if (is_string($filtered)) {
+                return $filtered;
+            }
+        }
+        return '';
     }
 
     private function authorize(): void {

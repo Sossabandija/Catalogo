@@ -40,6 +40,15 @@
 
 .cq-toolbar {
     margin: 16px 0;
+    flex-wrap: wrap;
+}
+
+.cq-toolbar label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.82rem;
+    color: #5c5348;
 }
 
 .cq-card {
@@ -76,6 +85,7 @@
 .cq-field select,
 .cq-search input,
 .cq-toolbar select,
+.cq-toolbar input,
 .cq-line input {
     border: 1px solid #d9cbb8;
     background: #fff;
@@ -85,9 +95,15 @@
     color: inherit;
 }
 
+.cq-field input[readonly] {
+    background: #f7f1e7;
+    color: #1c1915;
+}
+
 .cq-field input:focus,
 .cq-field select:focus,
 .cq-search input:focus,
+.cq-toolbar input:focus,
 .cq-line input:focus {
     outline: 2px solid #9a3412;
     border-color: #9a3412;
@@ -201,6 +217,35 @@
     text-align: right;
 }
 
+.cq-stepper {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+}
+
+.cq-stepper input {
+    width: 4.75rem;
+}
+
+.cq-step {
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid #c8b8a4;
+    background: #fff;
+    border-radius: 8px;
+    font: inherit;
+    font-size: 1.05rem;
+    line-height: 1;
+    cursor: pointer;
+    color: inherit;
+}
+
+.cq-step:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
 .cq-line.is-editing {
     background: #fff7ed;
 }
@@ -275,6 +320,57 @@
 .cq-badge-invoiced {
     background: #e5e7eb;
     color: #374151;
+}
+
+.cq-badge-expired {
+    background: #ffe4e6;
+    color: #9f1239;
+}
+
+.cq-badge + .cq-badge {
+    margin-left: 6px;
+}
+
+.cq-table tbody tr.is-expired td {
+    background: #fff1f2;
+}
+
+.cq-menu {
+    position: relative;
+}
+
+.cq-menu-panel {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 5;
+    min-width: 180px;
+    padding: 4px;
+    background: #fffdf8;
+    border: 1px solid #e4d9c8;
+    border-radius: 8px;
+}
+
+.cq-menu-item {
+    display: block;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    color: inherit;
+}
+
+.cq-menu-item:hover {
+    background: #f7f1e7;
+}
+
+.cq-top-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 
 .cq-empty {

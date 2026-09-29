@@ -3,11 +3,14 @@
 declare(strict_types=1);
 
 final class Riverso_POS_Customer_Quote_Repository {
+    /** @var array<string, true>|null */
+    private ?array $quote_column_map = null;
+
     public function __construct(private Riverso_POS_Database $db) {
     }
 
     /**
-     * @param array{status?: string} $filters
+     * @param array{status?: string, quote_type?: string, date_from?: string, date_to?: string} $filters
      * @return list<array<string, mixed>>
      */
     public function list_quotes(array $filters = []): array {
@@ -15,10 +18,26 @@ final class Riverso_POS_Customer_Quote_Repository {
         $items = $this->items_table();
         $sql = 'SELECT q.*, (SELECT COUNT(*) FROM ' . $items . ' i WHERE i.quote_id = q.id) AS line_count
                 FROM ' . $table . ' q';
+        $where = [];
         $params = [];
         if (!empty($filters['status'])) {
-            $sql .= ' WHERE q.status = ?';
+            $where[] = 'q.status = ?';
             $params[] = Riverso_POS_Quote_Status::normalize_legacy((string) $filters['status']);
+        }
+        if (!empty($filters['quote_type'])) {
+            $where[] = 'q.quote_type = ?';
+            $params[] = Riverso_POS_Quote_Type::normalize((string) $filters['quote_type']);
+        }
+        if (!empty($filters['date_from'])) {
+            $where[] = 'q.created_at >= ?';
+            $params[] = $this->date_bound((string) $filters['date_from'], false);
+        }
+        if (!empty($filters['date_to'])) {
+            $where[] = 'q.created_at <= ?';
+            $params[] = $this->date_bound((string) $filters['date_to'], true);
+        }
+        if ($where !== []) {
+            $sql .= ' WHERE ' . implode(' AND ', $where);
         }
         $sql .= ' ORDER BY q.updated_at DESC, q.id DESC';
         $rows = $this->db->fetch_all($sql, $params);
@@ -74,6 +93,7 @@ final class Riverso_POS_Customer_Quote_Repository {
         $validity_days = $this->validity_days($input['validity_days'] ?? null);
         $validity_terms = $this->nullable_text($input['validity_terms'] ?? null, 2000);
         $notes = $this->nullable_text($input['notes'] ?? ($existing['notes'] ?? null), 5000) ?? '';
+        $seller = $this->seller_for_save($input, $existing);
 
         $lines = [];
         foreach ($input['lines'] as $line) {
@@ -93,6 +113,7 @@ final class Riverso_POS_Customer_Quote_Repository {
             $validity_days,
             $validity_terms,
             $notes,
+            $seller,
             $totals,
             $now
         ): int {
@@ -110,6 +131,12 @@ final class Riverso_POS_Customer_Quote_Repository {
                 'profit_total' => $totals['profit_total'],
                 'updated_at' => $now,
             ];
+            if ($this->quote_has_column('seller_id')) {
+                $header['seller_id'] = $seller['seller_id'];
+            }
+            if ($this->quote_has_column('seller_name')) {
+                $header['seller_name'] = $seller['seller_name'];
+            }
             if ($existing === null) {
                 $header['quote_number'] = $this->next_number();
                 $header['status'] = Riverso_POS_Quote_Status::DRAFT;
@@ -214,6 +241,49 @@ final class Riverso_POS_Customer_Quote_Repository {
         ];
     }
 
+    /**
+     * @param array<string, mixed> $input
+     * @param array<string, mixed>|null $existing
+     * @return array{seller_id: int|null, seller_name: string}
+     */
+    private function seller_for_save(array $input, ?array $existing): array {
+        $existing_name = trim((string) ($existing['seller_name'] ?? ''));
+        if ($existing !== null && $existing_name !== '') {
+            return [
+                'seller_id' => $this->nullable_int($existing['seller_id'] ?? null),
+                'seller_name' => $this->clip($existing_name, 191),
+            ];
+        }
+        $name = $this->clip(trim((string) ($input['seller_name'] ?? '')), 191);
+        $id = $input['seller_id'] ?? null;
+        $id = $id === '' || $id === null ? null : (int) $id;
+        if ($id !== null && $id <= 0) {
+            $id = null;
+        }
+        return [
+            'seller_id' => $id,
+            'seller_name' => $name,
+        ];
+    }
+
+    private function date_bound(string $value, bool $end): string {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+            throw new Riverso_POS_Quote_Exception('La fecha del filtro no es válida.');
+        }
+        return $value . ($end ? ' 23:59:59' : ' 00:00:00');
+    }
+
+    private function quote_has_column(string $column): bool {
+        if ($this->quote_column_map === null) {
+            $map = [];
+            foreach ($this->db->columns($this->quotes_table()) as $name) {
+                $map[$name] = true;
+            }
+            $this->quote_column_map = $map;
+        }
+        return isset($this->quote_column_map[$column]);
+    }
+
     private function validity_days(mixed $value): ?int {
         if ($value === null || $value === '') {
             return null;
@@ -280,23 +350,29 @@ final class Riverso_POS_Customer_Quote_Repository {
         $status = Riverso_POS_Quote_Status::normalize_legacy((string) ($row['status'] ?? 'draft'));
         $type = (string) ($row['quote_type'] ?? Riverso_POS_Quote_Type::VENTA);
         $targets = Riverso_POS_Quote_Status::allowed_targets($status);
+        $issued_at = (string) ($row['created_at'] ?? '');
+        $validity_days = $this->nullable_int($row['validity_days'] ?? null);
         return [
             'id' => (int) $row['id'],
             'quote_number' => (string) $row['quote_number'],
             'customer_id' => $this->nullable_int($row['customer_id'] ?? null),
             'customer_name' => (string) ($row['customer_name'] ?? ''),
+            'seller_id' => $this->nullable_int($row['seller_id'] ?? null),
+            'seller_name' => (string) ($row['seller_name'] ?? ''),
             'quote_type' => $type,
             'quote_type_label' => Riverso_POS_Quote_Type::label($type),
             'status' => $status,
             'status_label' => Riverso_POS_Quote_Status::label($status),
-            'validity_days' => $this->nullable_int($row['validity_days'] ?? null),
+            'validity_days' => $validity_days,
             'validity_terms' => (string) ($row['validity_terms'] ?? ''),
             'net_total' => round((float) ($row['net_total'] ?? 0), 2),
             'discount_total' => round((float) ($row['discount_total'] ?? 0), 2),
             'margin_percent' => $this->nullable_float($row['margin_percent'] ?? null),
             'profit_total' => $this->nullable_float($row['profit_total'] ?? null),
             'notes' => (string) ($row['notes'] ?? ''),
-            'created_at' => (string) ($row['created_at'] ?? ''),
+            'issued_at' => $issued_at,
+            'expired' => Riverso_POS_Quote_Expiry::is_expired($issued_at, $validity_days, Riverso_POS_Quote_Expiry::today()),
+            'created_at' => $issued_at,
             'updated_at' => (string) ($row['updated_at'] ?? ''),
             'editable' => $status !== Riverso_POS_Quote_Status::INVOICED,
             'allowed_transitions' => array_map(static function (string $target): array {

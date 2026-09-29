@@ -64,6 +64,7 @@ echo "== migración ==\n";
 $db = memory_db();
 $phase1 = new Riverso_POS_Phase_001_Customer_Quotes_Base();
 $phase2 = new Riverso_POS_Phase_002_Sale_Quote_Fields();
+$phase3 = new Riverso_POS_Phase_003_Quote_Header_Identity();
 $phase1->up($db);
 $quotes = $db->table('customer_quotes');
 check($quotes === 'wp_riverso_customer_quotes', 'tabla con prefijo wp_riverso_');
@@ -97,17 +98,23 @@ foreach ($db->fetch_all('SELECT status, net_total FROM ' . $quotes . ' ORDER BY 
 check(isset($mapped['listed'], $mapped['draft'], $mapped['invoiced']), 'estados legado remapeados');
 check($mapped['listed'] === 1500.0, 'neto copia el total legado');
 check(!isset($mapped['sent']) && !isset($mapped['viewed']), 'sent y viewed ya no quedan');
+$phase3->up($db);
+$phase3->up($db);
+check(in_array('seller_id', $db->columns($quotes), true), 'columna seller_id');
+check(in_array('seller_name', $db->columns($quotes), true), 'columna seller_name');
 
 $fresh = memory_db();
 $runner = new Riverso_POS_Migration_Runner($fresh, riverso_pos_migrations());
 $applied = $runner->migrate();
-check($applied === ['001_customer_quotes_base', '002_sale_quote_fields'], 'runner aplica fase 001 y 002');
+check($applied === ['001_customer_quotes_base', '002_sale_quote_fields', '003_quote_header_identity'], 'runner aplica fase 001, 002 y 003');
 check($runner->migrate() === [], 'la migración es idempotente');
 
 echo "== crud ==\n";
 $repo = new Riverso_POS_Customer_Quote_Repository($fresh);
 $saved = $repo->save([
     'customer_name' => '',
+    'seller_id' => 7,
+    'seller_name' => 'María Soto',
     'quote_type' => 'venta',
     'validity_days' => 10,
     'validity_terms' => 'Precios sujetos a stock.',
@@ -129,10 +136,15 @@ check($saved['customer_name'] === '', 'cliente opcional');
 check($saved['net_total'] === 1780.0, 'el servidor recalcula el neto');
 check($saved['margin_percent'] === 42.7, 'margen de cabecera');
 check($saved['lines'][0]['unit_price'] === 890.0, 'guarda el precio de línea');
+check($saved['seller_name'] === 'María Soto' && $saved['seller_id'] === 7, 'guarda el vendedor');
+check($saved['issued_at'] === $saved['created_at'] && $saved['issued_at'] !== '', 'la emisión es la fecha de creación');
+check($saved['expired'] === false, 'una cotización nueva no está vencida');
 
 $edited = $repo->save([
     'id' => $saved['id'],
     'customer_name' => 'Ana Pérez',
+    'seller_id' => 9,
+    'seller_name' => 'Otra persona',
     'quote_type' => 'referencia',
     'validity_days' => 10,
     'lines' => [[
@@ -149,6 +161,8 @@ check($edited['quote_number'] === $saved['quote_number'], 'el número no cambia 
 check($edited['quote_type_label'] === 'Referencia', 'tipo referencia');
 check($edited['net_total'] === 3000.0 && $edited['lines'][0]['quantity'] === 3.0, 'edita cantidad y precio');
 check($edited['customer_name'] === 'Ana Pérez', 'guarda el cliente');
+check($edited['seller_name'] === 'María Soto' && $edited['seller_id'] === 7, 'el vendedor no cambia al editar');
+check($edited['quote_number'] !== '', 'el número queda asignado después de guardar');
 
 $listed = $repo->transition((int) $edited['id'], 'listed');
 check($listed['status_label'] === 'Lista', 'pasa a lista');
@@ -170,6 +184,25 @@ foreach ($list as $row) {
 check($by_number[$saved['quote_number']]['line_count'] === 1, 'la lista cuenta las líneas');
 check($by_number[$saved['quote_number']]['status_label'] === 'Borrador', 'la lista muestra Borrador');
 check($by_number[$second['quote_number']]['customer_name'] === 'Local', 'la lista muestra el cliente');
+check(is_float($by_number[$saved['quote_number']]['margin_percent']), 'la lista incluye la utilidad porcentual');
+check($by_number[$second['quote_number']]['margin_percent'] === null, 'sin líneas la utilidad porcentual va vacía');
+$today = gmdate('Y-m-d');
+$only_venta = $repo->list_quotes(['quote_type' => 'venta']);
+check(count($only_venta) === 1 && $only_venta[0]['quote_number'] === $second['quote_number'], 'filtra tipo venta');
+$only_ref = $repo->list_quotes(['quote_type' => 'referencia']);
+check(count($only_ref) === 1 && $only_ref[0]['quote_number'] === $saved['quote_number'], 'filtra tipo referencia');
+$by_date = $repo->list_quotes(['date_from' => $today, 'date_to' => $today]);
+check(count($by_date) === 2, 'filtra por la fecha de emisión');
+check($repo->list_quotes(['date_from' => '1999-01-01', 'date_to' => '1999-12-31']) === [], 'un rango vacío no devuelve cotizaciones');
+$combined = $repo->list_quotes(['quote_type' => 'venta', 'date_from' => $today, 'date_to' => $today]);
+check(count($combined) === 1, 'combina tipo y fecha');
+$bad_date = false;
+try {
+    $repo->list_quotes(['date_from' => '29-09-2026']);
+} catch (Riverso_POS_Quote_Exception $error) {
+    $bad_date = str_contains($error->getMessage(), 'fecha');
+}
+check($bad_date, 'rechaza una fecha de filtro inválida');
 
 $threw = false;
 try {
@@ -198,6 +231,50 @@ try {
     $bad_qty = true;
 }
 check($bad_qty, 'cantidad cero no se guarda');
+
+$fresh->update($fresh->table('customer_quotes'), [
+    'created_at' => '2020-01-01 08:00:00',
+    'validity_days' => 10,
+], 'id = ?', [(int) $saved['id']]);
+$expired = $repo->find((int) $saved['id']);
+check($expired !== null && $expired['expired'] === true, 'marca vencida si la emisión más la validez ya pasó');
+check(Riverso_POS_Quote_Expiry::is_expired('2026-01-01', 10, '2026-01-11') === false, 'el día de vencimiento todavía vale');
+check(Riverso_POS_Quote_Expiry::is_expired('2026-01-01', 10, '2026-01-12') === true, 'al día siguiente queda vencida');
+check(Riverso_POS_Quote_Expiry::is_expired('2026-01-01', 0, '2026-01-02') === true, 'validez cero vence al día siguiente');
+check(Riverso_POS_Quote_Expiry::is_expired('2026-01-01', null, '2030-01-01') === false, 'sin validez no vence');
+
+$legacy = memory_db();
+(new Riverso_POS_Phase_001_Customer_Quotes_Base())->up($legacy);
+(new Riverso_POS_Phase_002_Sale_Quote_Fields())->up($legacy);
+$legacy_repo = new Riverso_POS_Customer_Quote_Repository($legacy);
+$legacy_saved = $legacy_repo->save([
+    'customer_name' => 'Legado',
+    'seller_name' => 'Nadie',
+    'quote_type' => 'venta',
+    'lines' => [],
+]);
+check($legacy_saved['seller_name'] === '', 'sin columna de vendedor el guardado sigue');
+check($legacy_saved['issued_at'] !== '', 'sin columna nueva la emisión sale de created_at');
+
+echo "== portal ==\n";
+ob_start();
+(new Riverso_POS_Customer_Quote_Module(new Riverso_POS_Customer_Quote_Repository($fresh), catalog(), false))->render([
+    'ajaxUrl' => '/ajax',
+    'nonce' => 'test',
+    'assetBase' => '/assets',
+    'standalone' => true,
+    'sellerName' => 'María Soto',
+]);
+$html = (string) ob_get_clean();
+check(str_contains($html, 'id="cq-number"') && str_contains($html, 'readonly'), 'cabecera con número de solo lectura');
+check(str_contains($html, 'id="cq-issued"'), 'cabecera con fecha de emisión');
+check(str_contains($html, 'id="cq-seller"') && str_contains($html, 'María Soto'), 'cabecera con vendedor');
+check(str_contains($html, 'id="cq-type-filter"') && str_contains($html, 'id="cq-date-from"') && str_contains($html, 'id="cq-date-to"'), 'filtros de tipo y fecha');
+check(str_contains($html, 'Utilidad %'), 'columna de utilidad');
+check(str_contains($html, 'id="cq-pdf"') && str_contains($html, 'id="cq-options"'), 'controles PDF y Opciones');
+$js = (string) file_get_contents(dirname(__DIR__) . '/assets/js/customer-quotes.js');
+check(str_contains($js, 'cq-stepper') && str_contains($js, 'function renderList'), 'steppers y renderList');
+check(str_contains($js, 'La exportación PDF todavía no está disponible.'), 'PDF queda en stub sin motor de impresión');
 
 echo "== catálogo ==\n";
 $lookup = catalog();
