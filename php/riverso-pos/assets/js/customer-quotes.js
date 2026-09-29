@@ -87,6 +87,12 @@
                 closeLupa();
             }
         });
+        els.lupaDialog.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                closeLupa();
+            }
+        });
         els.lupaDialog.addEventListener("close", function () {
             if (state.view === "editor" && els.lupa) {
                 els.lupa.focus();
@@ -607,7 +613,9 @@
         state.lupaResults = [];
         state.lupaSearched = false;
         if (els.lupaQuery) {
-            els.lupaQuery.value = "";
+            els.lupaQuery.disabled = false;
+            els.lupaQuery.readOnly = false;
+            els.lupaQuery.value = els.search ? els.search.value : "";
         }
         setLupaScope("todo");
         renderLupaResults();
