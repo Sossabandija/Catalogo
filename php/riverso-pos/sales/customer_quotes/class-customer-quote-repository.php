@@ -147,6 +147,8 @@ final class Riverso_POS_Customer_Quote_Repository {
                     'quantity' => $line['quantity'],
                     'unit_price' => $line['unit_price'],
                     'unit_cost' => $line['unit_cost'],
+                    'price_discount' => $line['price_discount'],
+                    'margin_discount' => $line['margin_discount'],
                     'discount_amount' => $line['discount_amount'],
                     'line_total' => $line['line_net'],
                     'sort_order' => $line['sort_order'],
@@ -163,6 +165,8 @@ final class Riverso_POS_Customer_Quote_Repository {
     }
 
     /**
+     * Borrador ↔ lista. La utilidad negativa o el margen bajo no impiden pasar a lista.
+     *
      * @return array<string, mixed>
      */
     public function transition(int $id, string $to): array {
@@ -226,8 +230,21 @@ final class Riverso_POS_Customer_Quote_Repository {
             'quantity' => $quantity,
             'unit_price' => $price,
             'unit_cost' => $unit_cost === null ? null : round((float) $unit_cost, 2),
+            'price_discount' => $this->rate($line['price_discount'] ?? 0),
+            'margin_discount' => $this->rate($line['margin_discount'] ?? 0),
             'discount_amount' => round((float) ($line['discount_amount'] ?? 0), 2),
         ];
+    }
+
+    private function rate(mixed $value): float {
+        $rate = round((float) $value, 2);
+        if ($rate < 0) {
+            return 0.0;
+        }
+        if ($rate > 100) {
+            return 100.0;
+        }
+        return $rate;
     }
 
     private function validity_days(mixed $value): ?int {
@@ -386,6 +403,8 @@ final class Riverso_POS_Customer_Quote_Repository {
      * @return array<string, mixed>
      */
     private function present_line(array $line): array {
+        $calculated = Riverso_POS_Quote_Totals::calculate([$line]);
+        $normalized = $calculated['lines'][0];
         return [
             'id' => (int) ($line['id'] ?? 0),
             'product_id' => $this->nullable_int($line['product_id'] ?? null),
@@ -393,11 +412,15 @@ final class Riverso_POS_Customer_Quote_Repository {
             'supplier_code' => (string) ($line['supplier_code'] ?? ''),
             'barcode' => (string) ($line['barcode'] ?? ''),
             'description' => (string) ($line['description'] ?? ''),
-            'quantity' => round((float) ($line['quantity'] ?? 0), 3),
-            'unit_price' => round((float) ($line['unit_price'] ?? 0), 2),
-            'unit_cost' => $this->nullable_float($line['unit_cost'] ?? null),
-            'discount_amount' => round((float) ($line['discount_amount'] ?? 0), 2),
-            'line_net' => round((float) ($line['line_total'] ?? 0), 2),
+            'quantity' => (float) $normalized['quantity'],
+            'unit_price' => (float) $normalized['unit_price'],
+            'unit_cost' => $normalized['unit_cost'],
+            'price_discount' => (float) $normalized['price_discount'],
+            'margin_discount' => (float) $normalized['margin_discount'],
+            'discount_amount' => (float) $normalized['discount_amount'],
+            'line_net' => (float) $normalized['line_net'],
+            'line_profit' => $normalized['line_profit'],
+            'line_margin_percent' => $normalized['line_margin_percent'],
         ];
     }
 

@@ -57,13 +57,50 @@ $discounted = Riverso_POS_Quote_Totals::calculate([
     ['quantity' => 1, 'unit_price' => 1000, 'unit_cost' => 400, 'discount_amount' => 100],
 ]);
 check($discounted['net_total'] === 900.0 && $discounted['discount_total'] === 100.0, 'descuento baja el neto');
+$kept = Riverso_POS_Quote_Totals::calculate([
+    ['quantity' => 1, 'unit_price' => 1000, 'unit_cost' => 400, 'discount_amount' => 100, 'price_discount' => 0, 'margin_discount' => 0],
+]);
+check($kept['net_total'] === 900.0 && $kept['lines'][0]['discount_amount'] === 100.0, 'porcentajes en cero conservan el monto');
+$rates = Riverso_POS_Quote_Totals::calculate([
+    ['quantity' => 2, 'unit_price' => 890, 'unit_cost' => 510, 'price_discount' => 10, 'margin_discount' => 50, 'discount_amount' => 999],
+]);
+check($rates['discount_total'] === 469.0, 'los porcentajes mandan sobre el monto viejo');
+check($rates['net_total'] === 1311.0, 'neto con dscto precio y margen');
+check($rates['profit_total'] === 291.0, 'utilidad con ambos descuentos');
+check($rates['margin_percent'] === 22.2, 'margen 22,2');
+check($rates['lines'][0]['price_discount'] === 10.0 && $rates['lines'][0]['margin_discount'] === 50.0, 'guarda los porcentajes de la línea');
+$no_cost = Riverso_POS_Quote_Totals::calculate([
+    ['quantity' => 1, 'unit_price' => 1000, 'unit_cost' => null, 'price_discount' => 0, 'margin_discount' => 25],
+]);
+check($no_cost['net_total'] === 1000.0 && $no_cost['discount_total'] === 0.0, 'dscto margen sin costo no inventa descuento');
+check($no_cost['lines'][0]['margin_discount'] === 25.0 && $no_cost['profit_total'] === null, 'el porcentaje queda guardado');
+$clamped = Riverso_POS_Quote_Totals::calculate([
+    ['quantity' => 1, 'unit_price' => 1000, 'unit_cost' => 100, 'price_discount' => 150, 'margin_discount' => -4],
+]);
+check($clamped['lines'][0]['price_discount'] === 100.0 && $clamped['lines'][0]['margin_discount'] === 0.0, 'porcentajes entre 0 y 100');
+check($clamped['net_total'] === 0.0, '100 % de dscto precio deja el neto en cero');
 $empty = Riverso_POS_Quote_Totals::calculate([]);
 check($empty['net_total'] === 0.0 && $empty['margin_percent'] === null, 'cotización vacía sin margen');
+$healthy = Riverso_POS_Quote_Totals::calculate([
+    ['quantity' => 1, 'unit_price' => 1000, 'unit_cost' => 950],
+]);
+check(Riverso_POS_Quote_Totals::alarm($healthy['profit_total'], $healthy['margin_percent']) === '', 'margen 5 % sin alarma');
+$low_margin = Riverso_POS_Quote_Totals::calculate([
+    ['quantity' => 1, 'unit_price' => 1000, 'unit_cost' => 960],
+]);
+check($low_margin['margin_percent'] === 4.0, 'margen 4 %');
+check(Riverso_POS_Quote_Totals::alarm($low_margin['profit_total'], $low_margin['margin_percent']) === 'low', 'alarma ámbar bajo 5 %');
+$negative = Riverso_POS_Quote_Totals::calculate([
+    ['quantity' => 1, 'unit_price' => 1000, 'unit_cost' => 1200],
+]);
+check(Riverso_POS_Quote_Totals::alarm($negative['profit_total'], $negative['margin_percent']) === 'neg', 'alarma roja con utilidad negativa');
+check(Riverso_POS_Quote_Totals::alarm(null, null) === '', 'sin costo no hay alarma');
 
 echo "== migración ==\n";
 $db = memory_db();
 $phase1 = new Riverso_POS_Phase_001_Customer_Quotes_Base();
 $phase2 = new Riverso_POS_Phase_002_Sale_Quote_Fields();
+$phase3 = new Riverso_POS_Phase_003_Quote_Line_Discounts();
 $phase1->up($db);
 $quotes = $db->table('customer_quotes');
 check($quotes === 'wp_riverso_customer_quotes', 'tabla con prefijo wp_riverso_');
@@ -90,6 +127,12 @@ $item_columns = $db->columns($db->table('customer_quote_items'));
 foreach (['supplier_code', 'barcode', 'unit_cost', 'discount_amount'] as $column) {
     check(in_array($column, $item_columns, true), "columna de línea {$column}");
 }
+check(!in_array('price_discount', $item_columns, true) && !in_array('margin_discount', $item_columns, true), 'fase 002 no crea los dsctos avanzados');
+$phase3->up($db);
+$phase3->up($db);
+$item_columns = $db->columns($db->table('customer_quote_items'));
+check(in_array('price_discount', $item_columns, true), 'columna price_discount');
+check(in_array('margin_discount', $item_columns, true), 'columna margin_discount');
 $mapped = [];
 foreach ($db->fetch_all('SELECT status, net_total FROM ' . $quotes . ' ORDER BY id') as $row) {
     $mapped[$row['status']] = (float) $row['net_total'];
@@ -101,7 +144,7 @@ check(!isset($mapped['sent']) && !isset($mapped['viewed']), 'sent y viewed ya no
 $fresh = memory_db();
 $runner = new Riverso_POS_Migration_Runner($fresh, riverso_pos_migrations());
 $applied = $runner->migrate();
-check($applied === ['001_customer_quotes_base', '002_sale_quote_fields'], 'runner aplica fase 001 y 002');
+check($applied === ['001_customer_quotes_base', '002_sale_quote_fields', '003_quote_line_discounts'], 'runner aplica fase 001, 002 y 003');
 check($runner->migrate() === [], 'la migración es idempotente');
 
 echo "== crud ==\n";
@@ -200,6 +243,72 @@ try {
     $blocked = str_contains($error->getMessage(), 'facturada');
 }
 check($blocked, 'no edita una facturada');
+
+$with_discounts = $repo->save([
+    'customer_name' => 'Descuentos',
+    'quote_type' => 'venta',
+    'lines' => [[
+        'sku' => 'B20TAD',
+        'description' => 'Tornillo drywall rosca madera 6x1',
+        'quantity' => 2,
+        'unit_price' => 890,
+        'unit_cost' => 510,
+        'price_discount' => 10,
+        'margin_discount' => 50,
+    ]],
+]);
+check($with_discounts['net_total'] === 1311.0, 'el servidor recalcula con dsctos');
+check($with_discounts['discount_total'] === 469.0, 'total de descuentos persistido');
+check($with_discounts['lines'][0]['price_discount'] === 10.0, 'persiste dscto precio');
+check($with_discounts['lines'][0]['margin_discount'] === 50.0, 'persiste dscto margen');
+check($with_discounts['lines'][0]['line_profit'] === 291.0, 'utilidad de la línea');
+$reloaded = $repo->find((int) $with_discounts['id']);
+check($reloaded !== null && $reloaded['lines'][0]['price_discount'] === 10.0 && $reloaded['lines'][0]['margin_discount'] === 50.0, 'los dsctos siguen al reabrir');
+$qty_only = $repo->save([
+    'id' => $with_discounts['id'],
+    'customer_name' => 'Descuentos',
+    'quote_type' => 'venta',
+    'lines' => [[
+        'sku' => 'B20TAD',
+        'description' => 'Tornillo drywall rosca madera 6x1',
+        'quantity' => 1,
+        'unit_price' => 890,
+        'unit_cost' => 510,
+        'price_discount' => $reloaded['lines'][0]['price_discount'],
+        'margin_discount' => $reloaded['lines'][0]['margin_discount'],
+    ]],
+]);
+check($qty_only['lines'][0]['quantity'] === 1.0 && $qty_only['lines'][0]['price_discount'] === 10.0, 'editar cantidad no borra descuentos');
+
+$low = $repo->save([
+    'customer_name' => 'Margen bajo',
+    'quote_type' => 'venta',
+    'lines' => [[
+        'sku' => 'LOW',
+        'description' => 'Margen bajo',
+        'quantity' => 1,
+        'unit_price' => 1000,
+        'unit_cost' => 960,
+    ]],
+]);
+check(Riverso_POS_Quote_Totals::alarm($low['profit_total'], $low['margin_percent']) === 'low', 'cotización en ámbar');
+$listed_low = $repo->transition((int) $low['id'], 'listed');
+check($listed_low['status'] === 'listed', 'lista permitida con margen bajo');
+
+$loss = $repo->save([
+    'customer_name' => 'Pérdida',
+    'quote_type' => 'venta',
+    'lines' => [[
+        'sku' => 'LOSS',
+        'description' => 'Utilidad negativa',
+        'quantity' => 1,
+        'unit_price' => 1000,
+        'unit_cost' => 1200,
+    ]],
+]);
+check(Riverso_POS_Quote_Totals::alarm($loss['profit_total'], $loss['margin_percent']) === 'neg', 'cotización en rojo');
+$listed_loss = $repo->transition((int) $loss['id'], 'listed');
+check($listed_loss['status'] === 'listed', 'lista permitida con utilidad negativa');
 
 $bad_qty = false;
 try {

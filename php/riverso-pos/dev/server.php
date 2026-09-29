@@ -19,11 +19,12 @@ if (str_starts_with($uri, '/assets/')) {
     }
     $ext = pathinfo($path, PATHINFO_EXTENSION);
     header('Content-Type: ' . ($ext === 'css' ? 'text/css' : 'text/javascript') . '; charset=utf-8');
+    header('Cache-Control: no-store');
     readfile($path);
     exit;
 }
 
-$stamp = RIVERSO_POS_VERSION . '-p0p1';
+$stamp = RIVERSO_POS_VERSION . '-p2';
 $db_path = sys_get_temp_dir() . '/riverso-cotizaciones-preview.sqlite';
 $stamp_path = $db_path . '.stamp';
 if (!is_file($stamp_path) || file_get_contents($stamp_path) !== $stamp) {
