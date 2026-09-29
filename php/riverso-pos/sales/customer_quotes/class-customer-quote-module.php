@@ -1,6 +1,6 @@
 <?php
 /**
- * Cotizaciones de venta: CRUD AJAX y transición borrador ↔ lista (P0+P1+P1b).
+ * Cotizaciones de venta: CRUD AJAX, borrador ↔ lista y búsqueda (P0–P3).
  */
 
 declare(strict_types=1);
@@ -158,8 +158,29 @@ final class Riverso_POS_Customer_Quote_Module {
 
     public function ajax_search(): void {
         $this->authorize();
-        $query = $this->post_string('q');
-        $this->ok(['products' => $this->catalog->search($query, 20)]);
+        $this->ok($this->search_products(
+            $this->post_string('q'),
+            $this->post_string('mode'),
+            $this->post_string('scope')
+        ));
+    }
+
+    /**
+     * mode vacío conserva la búsqueda rápida.
+     * mode=advanced usa scope todo|descripcion|codigos.
+     *
+     * @return array<string, mixed>
+     */
+    public function search_products(string $query, string $mode = '', string $scope = ''): array {
+        if (strtolower(trim($mode)) === 'advanced') {
+            $normalized = Riverso_POS_Catalog_Product_Lookup::normalize_scope($scope);
+            return [
+                'products' => $this->catalog->search_advanced($query, $normalized, 20),
+                'mode' => 'advanced',
+                'scope' => $normalized,
+            ];
+        }
+        return ['products' => $this->catalog->search($query, 20)];
     }
 
     private function current_user_name(): string {

@@ -5,6 +5,7 @@
  * SKU: _sku
  * Código de barras: _barcode, _global_unique_id
  * Código proveedor: _riverso_supplier_code, _supplier_sku
+ * Descripción: post_title (no es meta)
  * Precio: _price, _regular_price
  * Costo (solo para margen/utilidad): _riverso_unit_cost, _wc_cog_cost, _alg_wc_cog_cost
  */
@@ -21,28 +22,56 @@ final class Riverso_POS_Woo_Catalog_Reader implements Riverso_POS_Catalog_Reader
         if ($query === '' || $limit <= 0) {
             return [];
         }
+        $search_title = in_array('description', $fields, true);
         $meta_keys = [];
         foreach ($fields as $field) {
             foreach (self::meta_keys_for($field) as $key) {
                 $meta_keys[] = $key;
             }
         }
-        if ($meta_keys === []) {
+        if ($meta_keys === [] && !$search_title) {
             return [];
         }
 
-        $placeholders = implode(', ', array_fill(0, count($meta_keys), '%s'));
         $like = '%' . $wpdb->esc_like($query) . '%';
-        $sql = "SELECT DISTINCT p.ID
-            FROM {$wpdb->posts} p
-            INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID
-            WHERE p.post_type IN ('product', 'product_variation')
-              AND p.post_status = 'publish'
-              AND m.meta_key IN ($placeholders)
-              AND (m.meta_value = %s OR m.meta_value LIKE %s)
-            LIMIT %d";
-        $params = array_merge($meta_keys, [$query, $like, max($limit * 4, $limit)]);
-        $prepared = $wpdb->prepare($sql, $params);
+        $cap = max($limit * 4, $limit);
+        if ($search_title && $meta_keys === []) {
+            $sql = "SELECT DISTINCT p.ID
+                FROM {$wpdb->posts} p
+                WHERE p.post_type IN ('product', 'product_variation')
+                  AND p.post_status = 'publish'
+                  AND (p.post_title = %s OR p.post_title LIKE %s)
+                LIMIT %d";
+            $prepared = $wpdb->prepare($sql, [$query, $like, $cap]);
+        } elseif ($search_title) {
+            $placeholders = implode(', ', array_fill(0, count($meta_keys), '%s'));
+            $sql = "SELECT DISTINCT p.ID
+                FROM {$wpdb->posts} p
+                LEFT JOIN {$wpdb->postmeta} m
+                  ON m.post_id = p.ID AND m.meta_key IN ($placeholders)
+                WHERE p.post_type IN ('product', 'product_variation')
+                  AND p.post_status = 'publish'
+                  AND (
+                    (m.meta_id IS NOT NULL AND (m.meta_value = %s OR m.meta_value LIKE %s))
+                    OR p.post_title = %s
+                    OR p.post_title LIKE %s
+                  )
+                LIMIT %d";
+            $params = array_merge($meta_keys, [$query, $like, $query, $like, $cap]);
+            $prepared = $wpdb->prepare($sql, $params);
+        } else {
+            $placeholders = implode(', ', array_fill(0, count($meta_keys), '%s'));
+            $sql = "SELECT DISTINCT p.ID
+                FROM {$wpdb->posts} p
+                INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID
+                WHERE p.post_type IN ('product', 'product_variation')
+                  AND p.post_status = 'publish'
+                  AND m.meta_key IN ($placeholders)
+                  AND (m.meta_value = %s OR m.meta_value LIKE %s)
+                LIMIT %d";
+            $params = array_merge($meta_keys, [$query, $like, $cap]);
+            $prepared = $wpdb->prepare($sql, $params);
+        }
         $ids = $wpdb->get_col($prepared);
         if (!is_array($ids) || $ids === []) {
             return [];

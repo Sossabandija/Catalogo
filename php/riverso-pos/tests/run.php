@@ -343,17 +343,83 @@ check(str_contains($html, 'Utilidad %'), 'columna de utilidad');
 check(str_contains($html, 'id="cq-pdf"') && str_contains($html, 'id="cq-options"'), 'controles PDF y Opciones');
 $js = (string) file_get_contents(dirname(__DIR__) . '/assets/js/customer-quotes.js');
 check(str_contains($js, 'cq-qty-stepper') && str_contains($js, 'PDF de cotización: próximamente (stub P1b).'), 'steppers y stub PDF');
+check(str_contains($html, 'id="cq-lupa"') && str_contains($html, 'id="cq-lupa-dialog"'), 'lupa y modal de búsqueda avanzada');
+check(str_contains($html, 'data-scope="todo"') && str_contains($html, '>Todo<'), 'scope Todo');
+check(str_contains($html, 'data-scope="descripcion"') && str_contains($html, '>Descripción<'), 'scope Descripción');
+check(str_contains($html, 'data-scope="codigos"') && str_contains($html, '>Códigos<'), 'scope Códigos');
+check(str_contains($html, 'id="cq-advanced"') && str_contains($html, 'Modo avanzado'), 'el modo avanzado de P2 sigue en la pantalla');
+check(str_contains($html, 'placeholder="SKU, código proveedor o código de barras"'), 'la búsqueda rápida conserva su placeholder');
+check(str_contains($html, 'customer-quotes.js?ver=0.1.3'), 'assets del plugin 0.1.3');
+check(str_contains($js, 'state.results.length === 1') && str_contains($js, 'addProduct(state.results[0])'), 'la búsqueda rápida sigue agregando un único resultado');
+check(!str_contains($js, 'lupaResults.length === 1'), 'el modal no tiene atajo de un solo resultado');
+$advanced_start = strpos($js, 'function searchAdvanced()');
+$advanced_end = strpos($js, 'function renderLupaResults()');
+$advanced_js = $advanced_start !== false && $advanced_end !== false ? substr($js, $advanced_start, $advanced_end - $advanced_start) : '';
+check(str_contains($advanced_js, 'mode: "advanced"') && str_contains($advanced_js, 'scope: state.lupaScope'), 'la lupa envía mode advanced y scope');
+check($advanced_js !== '' && !str_contains($advanced_js, 'addProduct'), 'buscar en la lupa no agrega líneas');
+$open_start = strpos($js, 'function openLupa()');
+$open_end = strpos($js, 'function closeLupa()');
+$open_js = $open_start !== false && $open_end !== false ? substr($js, $open_start, $open_end - $open_start) : '';
+check($open_js !== '' && !str_contains($open_js, 'addProduct') && !str_contains($open_js, 'post('), 'abrir la lupa no busca ni agrega');
 
 echo "== catálogo ==\n";
 $lookup = catalog();
 check(count($lookup->search('B20TAD')) === 1 && $lookup->search('b20tad')[0]['sku'] === 'B20TAD', 'busca por SKU');
+check($lookup->search('b20tad')[0]['description'] === 'Tornillo drywall rosca madera 6x1', 'la rápida sigue devolviendo la descripción');
 check($lookup->search('445')[0]['supplier_code'] === '445', 'busca por código proveedor');
 check($lookup->search('7803333333333')[0]['sku'] === '20ATHN', 'busca por código de barras');
 check($lookup->search('') === [], 'búsqueda vacía');
 check($lookup->search('NO-EXISTE') === [], 'sin resultados');
+check($lookup->search('tornillo') === [] && $lookup->search('drywall') === [] && $lookup->search('6x1') === [], 'la rápida no busca por descripción');
+check(Riverso_POS_Catalog_Match::score(['sku' => 'B20TAD'], ['sku'], 'b20') === 1, 'prefijo de SKU desde 2');
+check(Riverso_POS_Catalog_Match::score(['sku' => 'B20TAD'], ['sku'], '20ta') === 2, 'contiene en SKU desde 4');
+check(Riverso_POS_Catalog_Match::score(['sku' => 'B20TAD'], ['sku'], '20') === null, 'contiene en SKU no baja de 4');
+check(Riverso_POS_Catalog_Match::score(['description' => 'Tornillo drywall rosca madera 6x1'], ['description'], '6x1') === 2, 'contiene en descripción desde 2');
+check(Riverso_POS_Catalog_Match::score(['description' => 'Tornillo metálico'], ['description'], 'metalico') === 2, 'la descripción ignora acentos');
+$accent_lookup = riverso_pos_catalog_lookup(new Riverso_POS_Memory_Catalog_Reader([[
+    'product_id' => 201,
+    'sku' => 'MET1',
+    'supplier_code' => '900',
+    'barcode' => '7809999999999',
+    'description' => 'Tornillo metálico',
+    'unit_price' => 100,
+    'unit_cost' => 40,
+]]));
+$folded = $accent_lookup->search_advanced('metalico', 'descripcion');
+check(count($folded) === 1 && $folded[0]['sku'] === 'MET1', 'avanzada encuentra la descripción sin escribir el acento');
+check($accent_lookup->search('metalico') === [], 'la rápida ignora esa descripción');
+$by_desc = $lookup->search_advanced('tornillo', 'descripcion');
+check(count($by_desc) === 1 && $by_desc[0]['sku'] === 'B20TAD', 'avanzada por descripción');
+check($lookup->search_advanced('tornillo', 'codigos') === [], 'códigos no busca en la descripción');
+check($lookup->search_advanced('445', 'descripcion') === [], 'descripción no busca códigos');
+check($lookup->search_advanced('445', 'codigos')[0]['sku'] === '04RLHB', 'códigos incluyen al proveedor');
+check($lookup->search_advanced('7803333333333', 'Códigos')[0]['sku'] === '20ATHN', 'códigos aceptan el alias y las barras');
+check($lookup->search_advanced('drywall', 'todo')[0]['sku'] === 'B20TAD', 'todo incluye la descripción');
+check($lookup->search_advanced('6x1', 'descripcion')[0]['sku'] === 'B20TAD', 'descripción parcial corta');
+check(count($lookup->search_advanced('20', 'codigos')) === 1 && $lookup->search_advanced('20', 'codigos')[0]['sku'] === '20ATHN', 'códigos mantienen el umbral de la rápida');
+check($lookup->search_advanced('', 'todo') === [], 'avanzada vacía');
+check(Riverso_POS_Catalog_Product_Lookup::normalize_scope('Descripción') === 'descripcion', 'normaliza scope descripción');
+check(Riverso_POS_Catalog_Product_Lookup::normalize_scope('codes') === 'codigos', 'normaliza scope codes');
+check(Riverso_POS_Catalog_Product_Lookup::normalize_scope('') === 'todo', 'scope vacío es todo');
 check(Riverso_POS_Woo_Catalog_Reader::meta_keys_for('sku') === ['_sku'], 'SKU WooCommerce');
 check(in_array('_global_unique_id', Riverso_POS_Woo_Catalog_Reader::meta_keys_for('barcode'), true), 'barras WooCommerce');
 check(in_array('_supplier_sku', Riverso_POS_Woo_Catalog_Reader::meta_keys_for('supplier_code'), true), 'código proveedor WooCommerce');
+check(Riverso_POS_Woo_Catalog_Reader::meta_keys_for('description') === [], 'la descripción es el título, no un meta');
+$module = new Riverso_POS_Customer_Quote_Module(new Riverso_POS_Customer_Quote_Repository($fresh), $lookup, false);
+$quick = $module->search_products('B20TAD');
+check(count($quick['products']) === 1 && !array_key_exists('mode', $quick), 'riverso_cq_search sin mode sigue en rápida');
+$ignored = $module->search_products('tornillo', '', 'descripcion');
+check($ignored['products'] === [] && !array_key_exists('scope', $ignored), 'sin mode=advanced se ignora el scope');
+$api_desc = $module->search_products('tornillo', 'Advanced', 'description');
+check($api_desc['mode'] === 'advanced' && $api_desc['scope'] === 'descripcion' && $api_desc['products'][0]['sku'] === 'B20TAD', 'API advanced por descripción');
+$api_codes = $module->search_products('tornillo', 'advanced', 'codigos');
+check($api_codes['products'] === [] && $api_codes['scope'] === 'codigos', 'API advanced códigos ignora la descripción');
+$api_todo = $module->search_products('techo', 'advanced', 'todo');
+check($api_todo['scope'] === 'todo' && $api_todo['products'][0]['sku'] === '20ATHN', 'API advanced todo por descripción');
+$api_alias = $module->search_products('445', 'advanced', 'Códigos');
+check($api_alias['scope'] === 'codigos' && $api_alias['products'][0]['supplier_code'] === '445', 'API scope códigos');
+$api_fallback = $module->search_products('B20TAD', 'advanced', 'cualquiera');
+check($api_fallback['scope'] === 'todo' && $api_fallback['products'][0]['sku'] === 'B20TAD', 'scope desconocido cae en todo');
 
 echo "\n";
 if ($failures > 0) {

@@ -1,5 +1,9 @@
 <?php
 
+/**
+ * Catálogo en memoria. search_field acepta sku, supplier_code, barcode y description.
+ */
+
 declare(strict_types=1);
 
 final class Riverso_POS_Memory_Catalog_Reader implements Riverso_POS_Catalog_Reader {

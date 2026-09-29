@@ -1,6 +1,6 @@
 <?php
 /**
- * Portal de cotizaciones de venta (es-CL). P0+P1+P1b+P2.
+ * Portal de cotizaciones de venta (es-CL). P0+P1+P1b+P2+P3.
  *
  * @var array<string, mixed> $riverso_cq
  */
@@ -151,6 +151,13 @@ if (!function_exists('riverso_pos_json')) {
                     <div class="cq-search-row">
                         <input type="search" id="cq-search" autocomplete="off" placeholder="SKU, código proveedor o código de barras" enterkeyhint="search">
                         <button type="button" class="cq-btn" id="cq-search-btn">Buscar</button>
+                        <button type="button" class="cq-btn cq-lupa-btn" id="cq-lupa" aria-haspopup="dialog" aria-controls="cq-lupa-dialog" title="Búsqueda avanzada">
+                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"></circle>
+                                <path d="M16 16l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                            </svg>
+                            <span class="cq-sr">Lupa</span>
+                        </button>
                     </div>
                     <ul id="cq-results" class="cq-results" hidden></ul>
                 </div>
@@ -170,7 +177,7 @@ if (!function_exists('riverso_pos_json')) {
                         <tbody id="cq-lines"></tbody>
                     </table>
                 </div>
-                <p id="cq-lines-empty" class="cq-empty">Agrega productos con la búsqueda por SKU, código de proveedor o código de barras.</p>
+                <p id="cq-lines-empty" class="cq-empty">Agrega productos con la búsqueda rápida o abre la lupa para buscar por descripción y códigos.</p>
             </div>
 
             <footer class="cq-footer">
@@ -180,6 +187,27 @@ if (!function_exists('riverso_pos_json')) {
                     <button type="button" class="cq-btn cq-btn-primary" id="cq-save">Guardar</button>
                 </div>
             </footer>
+
+            <dialog id="cq-lupa-dialog" class="cq-lupa-dialog" aria-modal="true" aria-labelledby="cq-lupa-title">
+                <div class="cq-lupa-panel">
+                    <header class="cq-lupa-head">
+                        <h2 id="cq-lupa-title">Búsqueda avanzada</h2>
+                        <button type="button" class="cq-lupa-close" id="cq-lupa-close" aria-label="Cerrar búsqueda avanzada">×</button>
+                    </header>
+                    <div id="cq-lupa-scopes" class="cq-scope-tabs" role="tablist" aria-label="Alcance de la búsqueda">
+                        <button type="button" class="cq-chip is-active" role="tab" id="cq-scope-todo" data-scope="todo" aria-selected="true">Todo</button>
+                        <button type="button" class="cq-chip" role="tab" id="cq-scope-descripcion" data-scope="descripcion" aria-selected="false">Descripción</button>
+                        <button type="button" class="cq-chip" role="tab" id="cq-scope-codigos" data-scope="codigos" aria-selected="false">Códigos</button>
+                    </div>
+                    <div class="cq-search-row">
+                        <input type="search" id="cq-lupa-query" autocomplete="off" placeholder="Descripción, SKU, código proveedor o código de barras" enterkeyhint="search">
+                        <button type="button" class="cq-btn cq-btn-primary" id="cq-lupa-search">Buscar</button>
+                    </div>
+                    <p class="cq-lupa-hint">La búsqueda no agrega líneas. Elige un resultado para sumarlo a la cotización.</p>
+                    <p id="cq-lupa-message" class="cq-message" role="status"></p>
+                    <ul id="cq-lupa-results" class="cq-results" hidden></ul>
+                </div>
+            </dialog>
         </section>
         <p id="cq-list-message" class="cq-message" role="status"></p>
     </div>

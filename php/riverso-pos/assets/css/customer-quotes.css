@@ -75,6 +75,7 @@
 .cq-field input,
 .cq-field select,
 .cq-search input,
+.cq-lupa-dialog input,
 .cq-toolbar select,
 .cq-line input {
     border: 1px solid #d9cbb8;
@@ -88,6 +89,7 @@
 .cq-field input:focus,
 .cq-field select:focus,
 .cq-search input:focus,
+.cq-lupa-dialog input:focus,
 .cq-line input:focus {
     outline: 2px solid #9a3412;
     border-color: #9a3412;
@@ -150,6 +152,112 @@
 
 .cq-search-row input {
     flex: 1;
+}
+
+.cq-lupa-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    padding: 0;
+    flex: 0 0 auto;
+}
+
+.cq-lupa-btn svg {
+    width: 1.15rem;
+    height: 1.15rem;
+}
+
+.cq-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.cq-lupa-dialog {
+    width: min(640px, calc(100vw - 32px));
+    max-height: min(80vh, 720px);
+    margin: auto;
+    overflow: auto;
+    border: 1px solid #e4d9c8;
+    border-radius: 12px;
+    padding: 0;
+    background: #fffdf8;
+    color: #1c1915;
+    box-shadow: 0 24px 60px rgba(28, 25, 21, 0.28);
+}
+
+.cq-lupa-dialog::backdrop {
+    background: rgba(28, 25, 21, 0.48);
+}
+
+.cq-lupa-panel {
+    padding: 16px;
+}
+
+.cq-lupa-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.cq-lupa-head h2 {
+    margin: 0;
+    font-size: 1.15rem;
+}
+
+.cq-lupa-close {
+    border: 0;
+    background: transparent;
+    color: #5c5348;
+    font: inherit;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+}
+
+.cq-scope-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.cq-chip {
+    border: 1px solid #c8b8a4;
+    background: #fff;
+    color: inherit;
+    border-radius: 999px;
+    padding: 6px 12px;
+    font: inherit;
+    cursor: pointer;
+}
+
+.cq-chip.is-active {
+    background: #9a3412;
+    border-color: #9a3412;
+    color: #fff;
+}
+
+.cq-lupa-hint {
+    margin: 8px 0 0;
+    color: #6b6258;
+    font-size: 0.88rem;
+}
+
+.cq-lupa-dialog .cq-results {
+    max-height: 320px;
+    overflow: auto;
 }
 
 .cq-results {

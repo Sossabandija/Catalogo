@@ -24,7 +24,7 @@ if (str_starts_with($uri, '/assets/')) {
     exit;
 }
 
-$stamp = RIVERSO_POS_VERSION . '-p2';
+$stamp = RIVERSO_POS_VERSION . '-p3';
 $db_path = sys_get_temp_dir() . '/riverso-cotizaciones-preview.sqlite';
 $stamp_path = $db_path . '.stamp';
 if (!is_file($stamp_path) || file_get_contents($stamp_path) !== $stamp) {
