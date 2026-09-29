@@ -41,4 +41,5 @@ Thumbs.db
 *.tmp
 *.temp
 *.bak
+*.sqlite
 data/catalogo_mamut_2025_spatial.json
