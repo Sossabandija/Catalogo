@@ -23,7 +23,7 @@ if (str_starts_with($uri, '/assets/')) {
     exit;
 }
 
-$stamp = RIVERSO_POS_VERSION . '-p1b';
+$stamp = RIVERSO_POS_VERSION . '-p0p1';
 $db_path = sys_get_temp_dir() . '/riverso-cotizaciones-preview.sqlite';
 $stamp_path = $db_path . '.stamp';
 if (!is_file($stamp_path) || file_get_contents($stamp_path) !== $stamp) {
@@ -51,5 +51,5 @@ $module->render([
     'nonce' => 'dev',
     'assetBase' => '/assets',
     'standalone' => true,
-    'sellerName' => 'Vendedor local',
+    'currentUserName' => 'Vendedor local',
 ]);

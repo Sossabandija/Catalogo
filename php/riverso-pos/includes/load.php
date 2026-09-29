@@ -12,7 +12,6 @@ require_once __DIR__ . '/../migrations/class-migration-phase.php';
 require_once __DIR__ . '/../migrations/class-migration-runner.php';
 require_once __DIR__ . '/../migrations/phases/class-phase-001-customer-quotes-base.php';
 require_once __DIR__ . '/../migrations/phases/class-phase-002-sale-quote-fields.php';
-require_once __DIR__ . '/../migrations/phases/class-phase-003-quote-header-identity.php';
 require_once __DIR__ . '/../sales/customer_quotes/class-customer-quote-repository.php';
 require_once __DIR__ . '/../catalog/class-catalog-match.php';
 require_once __DIR__ . '/../catalog/class-catalog-reader.php';
@@ -29,7 +28,6 @@ function riverso_pos_migrations(): array {
     return [
         new Riverso_POS_Phase_001_Customer_Quotes_Base(),
         new Riverso_POS_Phase_002_Sale_Quote_Fields(),
-        new Riverso_POS_Phase_003_Quote_Header_Identity(),
     ];
 }
 

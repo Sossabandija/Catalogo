@@ -102,30 +102,3 @@ final class Riverso_POS_Quote_Type {
         throw new Riverso_POS_Quote_Exception('El tipo de cotización debe ser venta o referencia.');
     }
 }
-
-/**
- * Una cotización vence cuando la emisión más los días de validez es anterior a hoy.
- */
-final class Riverso_POS_Quote_Expiry {
-    public static function is_expired(string $issued_at, ?int $validity_days, string $today): bool {
-        if ($validity_days === null || $validity_days < 0) {
-            return false;
-        }
-        if (!preg_match('/^(\d{4}-\d{2}-\d{2})/', $issued_at, $matches)) {
-            return false;
-        }
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $today)) {
-            return false;
-        }
-        try {
-            $expiry = (new DateTimeImmutable($matches[1]))->modify('+' . $validity_days . ' days');
-        } catch (Throwable) {
-            return false;
-        }
-        return $expiry->format('Y-m-d') < $today;
-    }
-
-    public static function today(): string {
-        return gmdate('Y-m-d');
-    }
-}

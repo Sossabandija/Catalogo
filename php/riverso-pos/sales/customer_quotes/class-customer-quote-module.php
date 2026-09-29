@@ -1,6 +1,6 @@
 <?php
 /**
- * Cotizaciones de venta: CRUD AJAX y transición borrador ↔ lista.
+ * Cotizaciones de venta: CRUD AJAX y transición borrador ↔ lista (P0+P1+P1b).
  */
 
 declare(strict_types=1);
@@ -59,18 +59,13 @@ final class Riverso_POS_Customer_Quote_Module {
      * @param array<string, mixed> $config
      */
     public function render(array $config): void {
-        $seller = $this->current_seller();
-        if (isset($config['sellerName']) && is_string($config['sellerName']) && trim($config['sellerName']) !== '') {
-            $seller['name'] = trim($config['sellerName']);
+        $name = isset($config['currentUserName']) && is_string($config['currentUserName'])
+            ? trim($config['currentUserName'])
+            : '';
+        if ($name === '') {
+            $name = $this->current_user_name();
         }
-        if (array_key_exists('sellerId', $config)) {
-            $seller_id = $config['sellerId'];
-            $seller['id'] = $seller_id === null || $seller_id === '' ? null : (int) $seller_id;
-        }
-        unset($config['sellerName'], $config['sellerId']);
-        $config['seller'] = $seller;
-        $config['today'] = Riverso_POS_Quote_Expiry::today();
-        $config['printUrl'] = $this->print_url();
+        $config['currentUserName'] = $name;
         $config['actions'] = [
             'list' => 'riverso_cq_list',
             'get' => 'riverso_cq_get',
@@ -96,29 +91,28 @@ final class Riverso_POS_Customer_Quote_Module {
 
     public function ajax_list(): void {
         $this->authorize();
-        $filters = [];
         $status = $this->post_string('status');
+        $quote_type = $this->post_string('quote_type');
+        $date_from = $this->post_string('date_from');
+        $date_to = $this->post_string('date_to');
+        $filters = [];
         if ($status !== '' && $status !== 'all') {
             $filters['status'] = $status;
         }
-        $type = $this->post_string('quote_type');
-        if ($type !== '' && $type !== 'all') {
-            $filters['quote_type'] = $type;
+        if ($quote_type !== '' && $quote_type !== 'all') {
+            $filters['quote_type'] = $quote_type;
         }
-        $from = $this->post_string('date_from');
-        if ($from !== '') {
-            $filters['date_from'] = $from;
+        if ($date_from !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date_from)) {
+            $filters['date_from'] = $date_from;
         }
-        $to = $this->post_string('date_to');
-        if ($to !== '') {
-            $filters['date_to'] = $to;
+        if ($date_to !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date_to)) {
+            $filters['date_to'] = $date_to;
         }
         try {
-            $quotes = $this->quotes->list_quotes($filters);
+            $this->ok(['quotes' => $this->quotes->list_quotes($filters)]);
         } catch (Riverso_POS_Quote_Exception $error) {
             $this->fail($error->getMessage());
         }
-        $this->ok(['quotes' => $quotes]);
     }
 
     public function ajax_get(): void {
@@ -138,7 +132,6 @@ final class Riverso_POS_Customer_Quote_Module {
         if (!is_array($data)) {
             $this->fail('No se pudo leer la cotización.');
         }
-        $data = $this->apply_seller($data);
         try {
             $quote = $this->quotes->save($data);
         } catch (Riverso_POS_Quote_Exception $error) {
@@ -169,67 +162,19 @@ final class Riverso_POS_Customer_Quote_Module {
         $this->ok(['products' => $this->catalog->search($query, 20)]);
     }
 
-    /**
-     * @param array<string, mixed> $data
-     * @return array<string, mixed>
-     */
-    private function apply_seller(array $data): array {
-        $name = trim((string) ($data['seller_name'] ?? ''));
-        if ($name !== '') {
-            $data['seller_name'] = $name;
-            return $data;
-        }
-        $seller = $this->current_seller();
-        if ($seller['name'] === '') {
-            return $data;
-        }
-        $data['seller_name'] = $seller['name'];
-        if (!isset($data['seller_id']) || $data['seller_id'] === '' || $data['seller_id'] === null) {
-            $data['seller_id'] = $seller['id'];
-        }
-        return $data;
-    }
-
-    /**
-     * @return array{id: int|null, name: string}
-     */
-    private function current_seller(): array {
+    private function current_user_name(): string {
         if (!function_exists('wp_get_current_user')) {
-            return ['id' => null, 'name' => ''];
+            return '';
         }
         $user = wp_get_current_user();
         if (!is_object($user)) {
-            return ['id' => null, 'name' => ''];
+            return '';
         }
-        $id = isset($user->ID) ? (int) $user->ID : 0;
-        $name = '';
-        if (isset($user->display_name) && is_string($user->display_name)) {
-            $name = trim($user->display_name);
+        if (!empty($user->display_name)) {
+            return (string) $user->display_name;
         }
-        if ($name === '' && isset($user->user_login) && is_string($user->user_login)) {
-            $name = trim($user->user_login);
-        }
-        return [
-            'id' => $id > 0 ? $id : null,
-            'name' => $name,
-        ];
-    }
-
-    /**
-     * Este corte no trae motor PDF. Si Riverso publica una URL de impresión, se usa.
-     */
-    private function print_url(): string {
-        if (function_exists('riverso_pos_quote_print_url')) {
-            $url = riverso_pos_quote_print_url();
-            if (is_string($url)) {
-                return $url;
-            }
-        }
-        if (function_exists('apply_filters')) {
-            $filtered = apply_filters('riverso_pos_quote_print_url', '');
-            if (is_string($filtered)) {
-                return $filtered;
-            }
+        if (!empty($user->user_login)) {
+            return (string) $user->user_login;
         }
         return '';
     }
