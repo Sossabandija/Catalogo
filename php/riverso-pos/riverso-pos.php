@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Riverso POS
  * Description: Cotizaciones de venta del punto de venta Riverso. Este corte cubre borrador y lista.
- * Version: 0.1.1
+ * Version: 0.1.2
  * Author: Riverso
  * Text Domain: riverso-pos
  * Requires at least: 6.0
@@ -15,7 +15,7 @@ if (!defined('ABSPATH') && !defined('RIVERSO_POS_DEV')) {
     exit;
 }
 
-define('RIVERSO_POS_VERSION', '0.1.1');
+define('RIVERSO_POS_VERSION', '0.1.2');
 define('RIVERSO_POS_FILE', __FILE__);
 define('RIVERSO_POS_DIR', __DIR__);
 
